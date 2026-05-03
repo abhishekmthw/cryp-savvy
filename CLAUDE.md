@@ -20,7 +20,7 @@ Each sub-project has its own `CLAUDE.md` with full detail.
 # Backend
 cd backend && pip install -r requirements.txt
 cp .env.example .env   # fill in keys
-python src/bot.py
+python src/runner.py
 
 # Frontend (separate terminal)
 cd frontend && npm install

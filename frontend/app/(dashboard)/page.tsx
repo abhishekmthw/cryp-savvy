@@ -1,3 +1,4 @@
+import { BotControls } from "@/components/dashboard/bot-controls";
 import { StatCards } from "@/components/dashboard/stat-cards";
 import { PositionsTable } from "@/components/dashboard/positions-table";
 import { PnlChart } from "@/components/dashboard/pnl-chart";
@@ -9,6 +10,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold text-white">Dashboard</h1>
+
+      <BotControls />
 
       {/* Row 1: Stat cards */}
       <StatCards />

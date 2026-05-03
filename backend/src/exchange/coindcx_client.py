@@ -1,27 +1,41 @@
 """
 CoinDCX exchange client built on top of ccxt.
-Provides a clean interface for fetching market data and placing orders.
+
+Two modes:
+- **Public**: no keys — used by the shared MarketDataScanner for tickers,
+  OHLCV, and momentum ranking. CoinDCX exposes these endpoints unauthenticated.
+- **Authenticated**: per-user keys — used by each UserBot for placing orders
+  and reading their own balance.
 """
+
+from __future__ import annotations
+
+import sys
+import os
+from typing import Optional
 
 import ccxt
 import pandas as pd
-from typing import Optional
-import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from config import settings
 
 
 class CoinDCXClient:
-    def __init__(self):
+    def __init__(self, api_key: str = "", api_secret: str = ""):
         self._exchange = ccxt.coindcx({
-            "apiKey": settings.COINDCX_API_KEY,
-            "secret": settings.COINDCX_API_SECRET,
+            "apiKey":          api_key,
+            "secret":          api_secret,
             "enableRateLimit": True,
         })
         self._markets: Optional[dict] = None
+        self._has_keys = bool(api_key and api_secret)
 
-    # ── Market Data ───────────────────────────────────────────────────────────
+    @property
+    def has_keys(self) -> bool:
+        return self._has_keys
+
+    # ── Market Data (public) ──────────────────────────────────────────────────
 
     def load_markets(self) -> dict:
         if self._markets is None:
@@ -29,7 +43,6 @@ class CoinDCXClient:
         return self._markets
 
     def get_inr_symbols(self) -> list[str]:
-        """Return all active spot symbols quoted in INR."""
         markets = self.load_markets()
         return [
             sym for sym, data in markets.items()
@@ -39,7 +52,6 @@ class CoinDCXClient:
         ]
 
     def get_tickers(self, symbols: list[str]) -> dict:
-        """Fetch 24h ticker data for a list of symbols. Returns dict keyed by symbol."""
         tickers = {}
         for sym in symbols:
             try:
@@ -49,40 +61,28 @@ class CoinDCXClient:
         return tickers
 
     def get_top_momentum_symbols(self, n: int = settings.TOP_N_COINS) -> list[str]:
-        """
-        Rank all INR pairs by a composite momentum score:
-            score = (24h_change_pct * 0.5) + (24h_volume_rank * 0.5)
-        Returns top-n symbols.
-        """
         symbols = self.get_inr_symbols()
         tickers = self.get_tickers(symbols)
 
         rows = []
         for sym, t in tickers.items():
-            change = t.get("percentage") or 0.0     # 24h % change
-            volume = t.get("quoteVolume") or 0.0    # volume in INR
+            change = t.get("percentage") or 0.0
+            volume = t.get("quoteVolume") or 0.0
             rows.append({"symbol": sym, "change": change, "volume": volume})
 
         if not rows:
             return []
 
         df = pd.DataFrame(rows)
-        # Rank both metrics (higher is better) then average the ranks
         df["change_rank"] = df["change"].rank(ascending=True)
         df["volume_rank"] = df["volume"].rank(ascending=True)
         df["score"] = (df["change_rank"] + df["volume_rank"]) / 2
         df = df.sort_values("score", ascending=False)
-
-        # Only consider coins with positive 24h change (upward momentum)
         df = df[df["change"] > 0]
         return df["symbol"].head(n).tolist()
 
     def fetch_ohlcv(self, symbol: str, timeframe: str = settings.TIMEFRAME,
                     limit: int = settings.CANDLE_LIMIT) -> pd.DataFrame:
-        """
-        Fetch OHLCV candles for a symbol.
-        Returns a DataFrame with columns: timestamp, open, high, low, close, volume.
-        """
         raw = self._exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
         df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
@@ -92,18 +92,22 @@ class CoinDCXClient:
     def fetch_ticker(self, symbol: str) -> dict:
         return self._exchange.fetch_ticker(symbol)
 
-    # ── Order Placement (live only) ───────────────────────────────────────────
+    # ── Order Placement (authenticated) ───────────────────────────────────────
 
     def place_market_buy(self, symbol: str, amount_inr: float) -> dict:
-        """Place a market buy order for `amount_inr` worth of the asset."""
+        if not self._has_keys:
+            raise RuntimeError("Cannot place orders without API keys")
         ticker = self.fetch_ticker(symbol)
         price  = ticker["last"]
         qty    = amount_inr / price
         return self._exchange.create_market_buy_order(symbol, qty)
 
     def place_market_sell(self, symbol: str, qty: float) -> dict:
-        """Place a market sell order for the given quantity."""
+        if not self._has_keys:
+            raise RuntimeError("Cannot place orders without API keys")
         return self._exchange.create_market_sell_order(symbol, qty)
 
     def fetch_balance(self) -> dict:
+        if not self._has_keys:
+            raise RuntimeError("Cannot fetch balance without API keys")
         return self._exchange.fetch_balance()

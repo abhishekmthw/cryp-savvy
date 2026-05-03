@@ -73,17 +73,53 @@ export interface ChartPoint {
   value: number;
 }
 
+export interface ProviderStatus {
+  present: boolean;
+  valid: boolean;
+  last4: string | null;
+  verified_at: number | null;
+}
+
+export interface CredentialsSummary {
+  coindcx: ProviderStatus;
+  telegram: ProviderStatus;
+}
+
 // ── Fetch helper ───────────────────────────────────────────────────────────────
 
-async function apiFetch<T>(path: string, token: string): Promise<T> {
+async function apiFetch<T>(
+  path: string,
+  token: string,
+  init: RequestInit = {},
+): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...(init.headers ?? {}),
+    },
     cache: "no-store",
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${text}`);
+    let payload: unknown = null;
+    try {
+      payload = await res.json();
+    } catch {
+      payload = await res.text().catch(() => res.statusText);
+    }
+    const detail =
+      typeof payload === "object" && payload && "detail" in payload
+        ? (payload as { detail: unknown }).detail
+        : payload;
+    const err = new Error(
+      typeof detail === "string" ? detail : `API ${res.status}`,
+    ) as Error & { status: number; detail: unknown };
+    err.status = res.status;
+    err.detail = detail;
+    throw err;
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -107,4 +143,59 @@ export const api = {
 
   signals: (token: string) =>
     apiFetch<{ signals: Signal[]; last_scan_time: number }>("/api/signals", token),
+
+  credentials: {
+    list: (token: string) =>
+      apiFetch<CredentialsSummary>("/api/credentials", token),
+
+    saveCoindcx: (token: string, body: { api_key: string; api_secret: string }) =>
+      apiFetch<{ ok: boolean; verified_at: number; last4: string }>(
+        "/api/credentials/coindcx",
+        token,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+
+    deleteCoindcx: (token: string) =>
+      apiFetch<{ ok: boolean }>("/api/credentials/coindcx", token, { method: "DELETE" }),
+
+    testCoindcx: (token: string) =>
+      apiFetch<{ ok: boolean; message: string }>(
+        "/api/credentials/coindcx/test",
+        token,
+        { method: "POST" },
+      ),
+
+    saveTelegram: (token: string, body: { bot_token: string; chat_id: string }) =>
+      apiFetch<{ ok: boolean; verified_at: number; last4: string }>(
+        "/api/credentials/telegram",
+        token,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+
+    deleteTelegram: (token: string) =>
+      apiFetch<{ ok: boolean }>("/api/credentials/telegram", token, { method: "DELETE" }),
+
+    testTelegram: (token: string) =>
+      apiFetch<{ ok: boolean; message: string }>(
+        "/api/credentials/telegram/test",
+        token,
+        { method: "POST" },
+      ),
+  },
+
+  bot: {
+    start: (token: string) =>
+      apiFetch<{ ok: boolean; is_running: boolean }>("/api/bot/start", token, {
+        method: "POST",
+      }),
+    stop: (token: string) =>
+      apiFetch<{ ok: boolean; is_running: boolean }>("/api/bot/stop", token, {
+        method: "POST",
+      }),
+    setMode: (token: string, body: { mode: "paper" | "live"; confirm?: string }) =>
+      apiFetch<{ ok: boolean; mode: string }>("/api/bot/mode", token, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+  },
 };

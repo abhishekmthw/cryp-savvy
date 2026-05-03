@@ -5,7 +5,7 @@ builder = "dockerfile"
 
 [deploy]
 # Start the bot as a background worker
-startCommand = "python src/bot.py"
+startCommand = "python src/runner.py"
 
 # Restart automatically on crash — keeps the bot running 24/7
 restartPolicyType = "ON_FAILURE"

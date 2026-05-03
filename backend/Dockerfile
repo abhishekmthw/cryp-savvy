@@ -16,4 +16,4 @@ COPY . .
 # Create the data directory so SQLite and logs have a home
 RUN mkdir -p data
 
-CMD ["python", "src/bot.py"]
+CMD ["python", "src/runner.py"]

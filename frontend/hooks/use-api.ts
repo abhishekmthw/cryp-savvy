@@ -6,7 +6,7 @@
  */
 
 import { useAuth } from "@clerk/nextjs";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
 const REFETCH_INTERVAL = 30_000; // 30 s fallback polling (WebSocket is the primary path)
@@ -91,5 +91,139 @@ export function useSignals() {
       return api.signals(token);
     },
     refetchInterval: REFETCH_INTERVAL,
+  });
+}
+
+// ── Credentials ──────────────────────────────────────────────────────────────
+
+export function useCredentials() {
+  const getToken = useToken();
+  return useQuery({
+    queryKey: ["credentials"],
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.credentials.list(token);
+    },
+    staleTime: 0,
+  });
+}
+
+export function useSaveCoindcx() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { api_key: string; api_secret: string }) => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.credentials.saveCoindcx(token, body);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["credentials"] }),
+  });
+}
+
+export function useDeleteCoindcx() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.credentials.deleteCoindcx(token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["credentials"] }),
+  });
+}
+
+export function useTestCoindcx() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.credentials.testCoindcx(token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["credentials"] }),
+  });
+}
+
+export function useSaveTelegram() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { bot_token: string; chat_id: string }) => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.credentials.saveTelegram(token, body);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["credentials"] }),
+  });
+}
+
+export function useDeleteTelegram() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.credentials.deleteTelegram(token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["credentials"] }),
+  });
+}
+
+export function useTestTelegram() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.credentials.testTelegram(token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["credentials"] }),
+  });
+}
+
+// ── Bot control ─────────────────────────────────────────────────────────────
+
+export function useStartBot() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.bot.start(token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["status"] }),
+  });
+}
+
+export function useStopBot() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.bot.stop(token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["status"] }),
+  });
+}
+
+export function useSetMode() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { mode: "paper" | "live"; confirm?: string }) => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.bot.setMode(token, body);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["status"] }),
   });
 }

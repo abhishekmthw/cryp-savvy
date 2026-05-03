@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from src.bot.config import BotConfig
 from src.exchange.paper_trader import PaperTrader
 from src.trading.risk_manager import RiskManager
 from config import settings
@@ -16,16 +17,21 @@ from config import settings
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def trader():
-    t = PaperTrader()
+def cfg():
+    return BotConfig.defaults()
+
+
+@pytest.fixture
+def trader(cfg):
+    t = PaperTrader(cfg)
     # Override balance to a known value for deterministic tests
     t.balance_inr = 10_000.0
     return t
 
 
 @pytest.fixture
-def risk(trader):
-    return RiskManager(trader)
+def risk(trader, cfg):
+    return RiskManager(trader, cfg)
 
 
 # ── PaperTrader: buy ──────────────────────────────────────────────────────────

@@ -52,7 +52,7 @@ railway.toml
 ```bash
 pip install -r requirements.txt
 cp .env.example .env   # fill in keys
-python src/bot.py
+python src/runner.py
 # API available at http://localhost:8000
 ```
 
