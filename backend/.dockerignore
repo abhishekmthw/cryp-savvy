@@ -1,0 +1,22 @@
+# Secrets — never bake into image
+.env
+
+# Runtime data — mounted at runtime or re-created
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# Dev / editor files
+.vscode/
+.idea/
+*.md
+
+# Git
+.git/
+.gitignore

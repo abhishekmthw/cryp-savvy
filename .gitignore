@@ -1,0 +1,27 @@
+# ── Secrets — NEVER commit ────────────────────────────────────────────────────
+.env
+.env.local
+.env*.local
+
+# ── Backend runtime data ──────────────────────────────────────────────────────
+backend/data/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+node_modules/
+frontend/.next/
+frontend/out/
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
