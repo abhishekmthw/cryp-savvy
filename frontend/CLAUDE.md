@@ -72,7 +72,7 @@ The backend must be running at `NEXT_PUBLIC_API_URL` (default: `http://localhost
 | `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Yes | `/sign-up` |
 | `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | Yes | `/dashboard` |
 | `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | Yes | `/dashboard` |
-| `NEXT_PUBLIC_API_URL` | Yes | Backend URL (Railway in prod) |
+| `NEXT_PUBLIC_API_URL` | Yes | Backend URL (`https://api.<domain>` in prod, via Cloudflare Tunnel) |
 | `NEXT_PUBLIC_WS_URL` | Yes | WebSocket URL (`wss://` in prod) |
 
 ---
@@ -121,8 +121,9 @@ WebSocket events ──────────────────→ inval
 5. Add all env vars from `.env.example` in the Environment Variables section
 6. Deploy
 
-After deploy, update `API_CORS_ORIGINS` in the Railway backend service to include
-the Vercel URL (e.g. `https://crypsavvy-dashboard.vercel.app`).
+After deploy, update `API_CORS_ORIGINS` in the backend's `.env` on the OCI VM
+to include the Vercel URL (e.g. `https://crypsavvy-dashboard.vercel.app`), then
+`docker compose up -d` to apply. See [../deploy/README.md](../deploy/README.md).
 
 ---
 
