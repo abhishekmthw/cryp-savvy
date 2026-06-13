@@ -17,6 +17,13 @@ load_dotenv()
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+# SQLAlchemy's bare `postgresql://` scheme resolves to psycopg2; we ship psycopg
+# v3 (`psycopg[binary]`) instead, so rewrite the scheme to select the v3 driver.
+# Also normalise Supabase's legacy `postgres://` prefix.
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL[len("postgresql://"):]
+elif DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL[len("postgres://"):]
 
 # ── Encryption (KEK = master Key Encryption Key) ──────────────────────────────
 # Base64-encoded 32-byte key. Required at startup.
