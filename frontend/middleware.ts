@@ -1,17 +1,16 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-// Everything under /dashboard (and sub-routes) requires authentication.
-// Sign-in and sign-up pages are public.
-const isProtected = createRouteMatcher([
-  "/dashboard(.*)",
-  "/trades(.*)",
-  "/signals(.*)",
-  "/settings(.*)",
-  "/onboarding(.*)",
+// Public allowlist — every other route (including the dashboard at `/`)
+// requires authentication. Switched from a per-route protected list because
+// that approach silently failed to cover the root and was easy to drift
+// from the actual routes when adding pages.
+const isPublic = createRouteMatcher([
+  "/sign-in(.*)",
+  "/sign-up(.*)",
 ]);
 
 export default clerkMiddleware((auth, req) => {
-  if (isProtected(req)) auth().protect();
+  if (!isPublic(req)) auth().protect();
 });
 
 export const config = {

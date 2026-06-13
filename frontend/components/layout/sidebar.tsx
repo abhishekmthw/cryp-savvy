@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { BarChart2, Bot, History, Settings, Zap } from "lucide-react";
 
 const nav = [
-  { href: "/dashboard", label: "Dashboard", icon: BarChart2 },
+  { href: "/",          label: "Dashboard", icon: BarChart2 },
   { href: "/trades",    label: "Trades",    icon: History   },
   { href: "/signals",   label: "Signals",   icon: Zap       },
   { href: "/settings",  label: "Settings",  icon: Settings  },

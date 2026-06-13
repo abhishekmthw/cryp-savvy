@@ -13,15 +13,16 @@ Deploys to **Vercel** (set Root Directory = `frontend`).
 ```
 app/
   layout.tsx                    Root layout — ClerkProvider + Providers
-  page.tsx                      Redirects / → /dashboard
   (auth)/
-    sign-in/[[...sign-in]]/     Clerk sign-in page
-    sign-up/[[...sign-up]]/     Clerk sign-up page
-  (dashboard)/
+    sign-in/[[...sign-in]]/     Clerk sign-in page (public)
+    sign-up/[[...sign-up]]/     Clerk sign-up page (public)
+  (dashboard)/                  Route group — shared Sidebar+Navbar layout, no URL prefix
     layout.tsx                  Protected layout — Sidebar + Navbar
-    page.tsx                    Main dashboard (stat cards, positions, chart, feeds)
-    trades/page.tsx             Full trade history table
-    signals/page.tsx            Full signal scanner table
+    page.tsx                    Main dashboard at /   (stat cards, positions, chart, feeds)
+    trades/page.tsx             Full trade history table at /trades
+    signals/page.tsx            Full signal scanner table at /signals
+    settings/page.tsx           Per-user credentials + bot config at /settings
+    onboarding/page.tsx         First-run setup wizard at /onboarding
 components/
   providers.tsx                 QueryClientProvider (client component)
   layout/
