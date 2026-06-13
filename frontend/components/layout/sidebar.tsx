@@ -3,16 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart2, History, Settings, Zap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-
-const nav = [
-  { href: "/",         label: "Dashboard", icon: BarChart2 },
-  { href: "/trades",   label: "Trades",    icon: History   },
-  { href: "/signals",  label: "Signals",   icon: Zap       },
-  { href: "/settings", label: "Settings",  icon: Settings  },
-];
+import { navItems } from "@/components/layout/nav-items";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -39,7 +32,7 @@ export function Sidebar() {
       </Link>
 
       <nav className="flex flex-col gap-1">
-        {nav.map(({ href, label, icon: Icon }) => {
+        {navItems.map(({ href, label, icon: Icon }) => {
           const active =
             href === "/"
               ? pathname === "/"
