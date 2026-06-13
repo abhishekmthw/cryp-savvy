@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from typing import Iterable, Optional
 
-from sqlalchemy import desc, select
+from sqlalchemy import case, desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -165,10 +165,21 @@ def trades_for_user(db: Session, user_id: str, limit: int = 50, offset: int = 0)
 
 
 def trade_stats(db: Session, user_id: str) -> dict:
-    trades = list(db.execute(
-        select(Trade.pnl, Trade.pnl_pct).where(Trade.user_id == user_id)
-    ))
-    total = len(trades)
+    win_case  = case((Trade.pnl > 0, 1), else_=0)
+    loss_case = case((Trade.pnl < 0, 1), else_=0)
+    row = db.execute(
+        select(
+            func.count(Trade.id).label("total"),
+            func.coalesce(func.sum(win_case),  0).label("wins"),
+            func.coalesce(func.sum(loss_case), 0).label("losses"),
+            func.coalesce(func.sum(Trade.pnl),     0.0).label("total_pnl"),
+            func.coalesce(func.avg(Trade.pnl_pct), 0.0).label("avg_pnl_pct"),
+            func.coalesce(func.max(Trade.pnl_pct), 0.0).label("best_pct"),
+            func.coalesce(func.min(Trade.pnl_pct), 0.0).label("worst_pct"),
+        ).where(Trade.user_id == user_id)
+    ).one()
+
+    total = int(row.total or 0)
     if total == 0:
         return {
             "total_trades": 0, "wins": 0, "losses": 0,
@@ -176,33 +187,44 @@ def trade_stats(db: Session, user_id: str) -> dict:
             "avg_pnl_pct": 0.0, "best_trade_pct": 0.0,
             "worst_trade_pct": 0.0,
         }
-    pnls = [(p or 0) for p, _ in trades]
-    pcts = [(pp or 0) for _, pp in trades]
-    wins = sum(1 for p in pnls if p > 0)
-    losses = sum(1 for p in pnls if p < 0)
+    wins = int(row.wins or 0)
     return {
         "total_trades":    total,
         "wins":            wins,
-        "losses":          losses,
+        "losses":          int(row.losses or 0),
         "win_rate":        round(wins / total * 100, 1),
-        "total_pnl":       round(sum(pnls), 2),
-        "avg_pnl_pct":     round(sum(pcts) / total, 2),
-        "best_trade_pct":  round(max(pcts), 2),
-        "worst_trade_pct": round(min(pcts), 2),
+        "total_pnl":       round(float(row.total_pnl  or 0), 2),
+        "avg_pnl_pct":     round(float(row.avg_pnl_pct or 0), 2),
+        "best_trade_pct":  round(float(row.best_pct   or 0), 2),
+        "worst_trade_pct": round(float(row.worst_pct  or 0), 2),
     }
 
 
+def count_trades(db: Session, user_id: str) -> int:
+    return int(db.execute(
+        select(func.count(Trade.id)).where(Trade.user_id == user_id)
+    ).scalar() or 0)
+
+
 def pnl_history_for_user(db: Session, user_id: str, initial_capital: float) -> list[dict]:
+    # Running P&L computed in SQL via a window function — avoids shipping every
+    # trade row to Python just to add them up.
+    running_pnl = func.sum(func.coalesce(Trade.pnl, 0.0)).over(
+        order_by=Trade.ts.asc(),
+        rows=(None, 0),
+    ).label("running_pnl")
     rows = list(db.execute(
-        select(Trade.ts, Trade.pnl)
+        select(Trade.ts, running_pnl)
         .where(Trade.user_id == user_id)
         .order_by(Trade.ts.asc())
     ))
-    running = float(initial_capital)
-    history = [{"ts": rows[0][0] if rows else time.time(), "value": round(running, 2)}]
-    for ts, pnl in rows:
-        running += (pnl or 0)
-        history.append({"ts": ts, "value": round(running, 2)})
+
+    initial = float(initial_capital)
+    if not rows:
+        return [{"ts": time.time(), "value": round(initial, 2)}]
+    history = [{"ts": rows[0][0], "value": round(initial, 2)}]
+    for ts, running in rows:
+        history.append({"ts": ts, "value": round(initial + float(running or 0), 2)})
     return history
 
 

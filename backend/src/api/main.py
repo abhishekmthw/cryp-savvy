@@ -178,8 +178,8 @@ def create_app(scanner: MarketDataScanner, orchestrator: BotOrchestrator) -> Fas
     ):
         with session_scope() as db:
             trades = repo.trades_for_user(db, user.clerk_user_id, limit=limit, offset=offset)
-            stats  = repo.trade_stats(db, user.clerk_user_id)
-        return {"trades": trades, "total": stats["total_trades"]}
+            total  = repo.count_trades(db, user.clerk_user_id)
+        return {"trades": trades, "total": total}
 
     @app.get("/api/signals")
     async def get_signals(user: Annotated[User, Depends(get_current_user)]):

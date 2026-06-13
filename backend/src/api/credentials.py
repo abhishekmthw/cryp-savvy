@@ -17,6 +17,7 @@ never has a "saved but unverified" state.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Annotated
 
@@ -142,7 +143,7 @@ async def put_coindcx(
     db:    Annotated[Session, Depends(get_db)],
     vault: Annotated[CredentialVault, Depends(get_vault)],
 ):
-    ok, message = validate_coindcx(body.api_key, body.api_secret)
+    ok, message = await asyncio.to_thread(validate_coindcx, body.api_key, body.api_secret)
     if not ok:
         # Do not save anything that didn't validate — fail closed.
         raise HTTPException(
@@ -181,7 +182,7 @@ async def test_coindcx(
     if pair is None:
         raise HTTPException(404, detail="no_coindcx_credentials")
     api_key, api_secret = pair
-    ok, message = validate_coindcx(api_key, api_secret)
+    ok, message = await asyncio.to_thread(validate_coindcx, api_key, api_secret)
     repo.upsert_credential(  # update validity flag + verified_at without re-encrypting
         db,
         user_id=user.clerk_user_id, provider=P_COINDCX_KEY,
@@ -202,7 +203,7 @@ async def put_telegram(
     db:    Annotated[Session, Depends(get_db)],
     vault: Annotated[CredentialVault, Depends(get_vault)],
 ):
-    ok, message = validate_telegram(body.bot_token, body.chat_id)
+    ok, message = await validate_telegram(body.bot_token, body.chat_id)
     if not ok:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -240,5 +241,5 @@ async def test_telegram(
     if pair is None:
         raise HTTPException(404, detail="no_telegram_credentials")
     bot_token, chat_id = pair
-    ok, message = validate_telegram(bot_token, chat_id)
+    ok, message = await validate_telegram(bot_token, chat_id)
     return {"ok": ok, "message": message}
