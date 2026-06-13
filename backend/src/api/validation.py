@@ -18,16 +18,16 @@ def validate_coindcx(api_key: str, api_secret: str) -> tuple[bool, str]:
     if not api_key or not api_secret:
         return False, "missing_credentials"
     try:
-        import ccxt
-        client = ccxt.coindcx({
-            "apiKey":          api_key,
-            "secret":          api_secret,
-            "enableRateLimit": True,
-        })
+        import requests
+        from src.exchange.coindcx_client import CoinDCXClient
+        client = CoinDCXClient(api_key=api_key, api_secret=api_secret)
         client.fetch_balance()
         return True, "ok"
-    except ccxt.AuthenticationError as exc:  # type: ignore[attr-defined]
-        return False, f"authentication_failed: {exc}"
+    except requests.HTTPError as exc:
+        # CoinDCX returns 401 on bad keys, 400 on malformed signature
+        if exc.response is not None and exc.response.status_code in (400, 401):
+            return False, f"authentication_failed: {exc}"
+        return False, f"network_or_provider_error: {exc}"
     except Exception as exc:
         return False, f"network_or_provider_error: {exc}"
 

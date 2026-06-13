@@ -16,7 +16,7 @@ Deploys to **Railway** (set Root Directory = `backend`).
 config/settings.py              All tunable parameters + env var loading
 src/
   exchange/
-    coindcx_client.py           CoinDCX REST API via ccxt
+    coindcx_client.py           CoinDCX REST API (direct — ccxt has no coindcx)
     paper_trader.py             Simulation engine (fake balance/positions)
   data/
     market_data.py              OHLCV fetcher with 60s cache
