@@ -3,13 +3,20 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Loader2, ArrowRight, Lock } from "lucide-react";
+import { Loader2, ArrowRight, Lock, Check } from "lucide-react";
+
 import {
   useCredentials,
   useSaveCoindcx,
   useSaveTelegram,
 } from "@/hooks/use-api";
 import { CoindcxSetupGuide } from "@/components/onboarding/coindcx-setup-guide";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -52,130 +59,144 @@ export default function OnboardingPage() {
     });
   }
 
-  function skipTelegram() {
-    setStep("done");
-  }
-
   return (
-    <div className="max-w-xl mx-auto py-6 space-y-6">
+    <div className="mx-auto max-w-xl space-y-6 py-2">
       <header>
-        <h1 className="text-2xl font-bold text-white">Welcome to CrypSavvy</h1>
-        <p className="text-sm text-muted mt-1">
+        <h1 className="text-2xl font-bold tracking-tight">Welcome to <span className="text-brand-gradient">CrypSavvy</span></h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           Two short steps to get your bot running. Everything is encrypted at rest.
         </p>
       </header>
 
-      <Steps current={step} />
+      <Stepper current={step} />
 
       {step === "coindcx" && (
         <>
           <CoindcxSetupGuide />
-          <form
-            onSubmit={submitCoindcx}
-            className="bg-card border border-border rounded-xl p-5 space-y-4"
-          >
-            <div>
-              <h2 className="text-base font-semibold text-white">Step 1 — CoinDCX</h2>
-              <p className="text-sm text-muted mt-1">
-                Paste the API Key and Secret you just created.
-              </p>
-            </div>
+          <Card className="border-border/60 bg-card/70 backdrop-blur">
+            <CardHeader>
+              <CardTitle>Step 1 — CoinDCX</CardTitle>
+              <CardDescription>Paste the API Key and Secret you just created.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={submitCoindcx} className="space-y-4">
+                <Field
+                  id="api_key"
+                  label="API Key"
+                  value={coindcx.api_key}
+                  onChange={(v) => setCoindcx((c) => ({ ...c, api_key: v }))}
+                  type="password"
+                />
+                <Field
+                  id="api_secret"
+                  label="API Secret"
+                  value={coindcx.api_secret}
+                  onChange={(v) => setCoindcx((c) => ({ ...c, api_secret: v }))}
+                  type="password"
+                />
 
-            <Field
-              label="API Key"
-              value={coindcx.api_key}
-              onChange={(v) => setCoindcx((c) => ({ ...c, api_key: v }))}
-              type="password"
-            />
-            <Field
-              label="API Secret"
-              value={coindcx.api_secret}
-              onChange={(v) => setCoindcx((c) => ({ ...c, api_secret: v }))}
-              type="password"
-            />
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
 
-            {error && <p className="text-sm text-rose-400">{error}</p>}
-
-            <SubmitButton
-              label="Save & verify"
-              loading={saveCoindcx.isPending}
-              disabled={!coindcx.api_key || !coindcx.api_secret}
-            />
-          </form>
+                <Button
+                  type="submit"
+                  disabled={!coindcx.api_key || !coindcx.api_secret || saveCoindcx.isPending}
+                  className="bg-gradient-to-r from-primary to-fuchsia-600 text-white shadow-md shadow-primary/25 hover:opacity-95"
+                >
+                  {saveCoindcx.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save &amp; verify
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
         </>
       )}
 
       {step === "telegram" && (
-        <form
-          onSubmit={submitTelegram}
-          className="bg-card border border-border rounded-xl p-5 space-y-4"
-        >
-          <div>
-            <h2 className="text-base font-semibold text-white">Step 2 — Telegram (optional)</h2>
-            <p className="text-sm text-muted mt-1">
-              For trade alerts. Create a bot via @BotFather and grab your chat ID
-              from @userinfobot. Send your bot any message first so it can reply.
-            </p>
-          </div>
+        <Card className="border-border/60 bg-card/70 backdrop-blur">
+          <CardHeader>
+            <CardTitle>Step 2 — Telegram (optional)</CardTitle>
+            <CardDescription>
+              For trade alerts. Create a bot via @BotFather and grab your chat
+              ID from @userinfobot. Send your bot any message first so it can reply.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={submitTelegram} className="space-y-4">
+              <Field
+                id="bot_token"
+                label="Bot Token"
+                value={telegram.bot_token}
+                onChange={(v) => setTelegram((t) => ({ ...t, bot_token: v }))}
+                type="password"
+              />
+              <Field
+                id="chat_id"
+                label="Chat ID"
+                value={telegram.chat_id}
+                onChange={(v) => setTelegram((t) => ({ ...t, chat_id: v }))}
+                type="text"
+              />
 
-          <Field
-            label="Bot Token"
-            value={telegram.bot_token}
-            onChange={(v) => setTelegram((t) => ({ ...t, bot_token: v }))}
-            type="password"
-          />
-          <Field
-            label="Chat ID"
-            value={telegram.chat_id}
-            onChange={(v) => setTelegram((t) => ({ ...t, chat_id: v }))}
-            type="text"
-          />
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
 
-          {error && <p className="text-sm text-rose-400">{error}</p>}
-
-          <div className="flex items-center gap-2">
-            <SubmitButton
-              label="Save & verify"
-              loading={saveTelegram.isPending}
-              disabled={!telegram.bot_token || !telegram.chat_id}
-            />
-            <button
-              type="button"
-              onClick={skipTelegram}
-              className="px-4 py-2 rounded-lg border border-border text-sm text-muted hover:text-white"
-            >
-              Skip for now
-            </button>
-          </div>
-        </form>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="submit"
+                  disabled={!telegram.bot_token || !telegram.chat_id || saveTelegram.isPending}
+                >
+                  {saveTelegram.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save &amp; verify
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setStep("done")}>
+                  Skip for now
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
       )}
 
       {step === "done" && (
-        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
-          <div className="flex items-start gap-3">
-            <Lock className="w-5 h-5 text-accent mt-0.5 shrink-0" />
-            <div>
-              <h2 className="text-base font-semibold text-white">You&apos;re ready.</h2>
-              <p className="text-sm text-muted mt-1">
-                Your bot defaults to <strong className="text-white">paper mode</strong> with
-                ₹10,000 starting balance. Start it from the dashboard whenever
-                you&apos;re ready. You can edit credentials anytime in Settings.
-              </p>
+        <Card className="relative overflow-hidden border-border/60 bg-card/70 backdrop-blur">
+          <div className="absolute inset-0 -z-10 bg-gradient-to-br from-primary/10 via-transparent to-fuchsia-500/10" />
+          <CardHeader>
+            <div className="flex items-start gap-3">
+              <span className="rounded-xl border border-primary/40 bg-primary/10 p-2.5">
+                <Lock className="h-5 w-5 text-primary" />
+              </span>
+              <div>
+                <CardTitle>You&apos;re ready.</CardTitle>
+                <CardDescription className="mt-1">
+                  Your bot defaults to <strong className="text-foreground">paper mode</strong>{" "}
+                  with ₹10,000 starting balance. Start it from the dashboard whenever
+                  you&apos;re ready. You can edit credentials anytime in Settings.
+                </CardDescription>
+              </div>
             </div>
-          </div>
-          <button
-            onClick={() => router.push("/")}
-            className="px-4 py-2 rounded-lg bg-accent text-black text-sm font-medium hover:bg-accent/90 inline-flex items-center gap-2"
-          >
-            Open dashboard
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
+          </CardHeader>
+          <CardContent>
+            <Button
+              onClick={() => router.push("/")}
+              className="bg-gradient-to-r from-primary to-fuchsia-600 text-white shadow-md shadow-primary/25 hover:opacity-95"
+            >
+              Open dashboard
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
-      <p className="text-xs text-muted text-center">
+      <p className="text-center text-xs text-muted-foreground">
         Need to come back later?{" "}
-        <Link href="/settings" className="text-accent underline">
+        <Link href="/settings" className="text-primary underline">
           Settings
         </Link>{" "}
         has all the same controls.
@@ -184,62 +205,78 @@ export default function OnboardingPage() {
   );
 }
 
-function Steps({ current }: { current: "coindcx" | "telegram" | "done" }) {
+function Stepper({ current }: { current: "coindcx" | "telegram" | "done" }) {
   const steps = [
-    { id: "coindcx",  label: "CoinDCX" },
+    { id: "coindcx", label: "CoinDCX" },
     { id: "telegram", label: "Telegram" },
-    { id: "done",     label: "Ready" },
+    { id: "done", label: "Ready" },
   ];
   const activeIdx = steps.findIndex((s) => s.id === current);
   return (
-    <div className="flex items-center gap-2">
-      {steps.map((s, i) => (
-        <div key={s.id} className="flex items-center gap-2">
-          <div
-            className={`text-xs px-2 py-1 rounded-full border ${
-              i <= activeIdx
-                ? "border-accent text-accent"
-                : "border-border text-muted"
-            }`}
-          >
-            {i + 1}. {s.label}
-          </div>
-          {i < steps.length - 1 && <div className="w-4 h-px bg-border" />}
-        </div>
-      ))}
-    </div>
+    <ol className="flex items-center gap-2">
+      {steps.map((s, i) => {
+        const done = i < activeIdx;
+        const active = i === activeIdx;
+        return (
+          <li key={s.id} className="flex flex-1 items-center gap-2">
+            <div
+              className={cn(
+                "flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                active
+                  ? "border-primary/50 bg-primary/10 text-primary"
+                  : done
+                  ? "border-success/40 bg-success/10 text-success"
+                  : "border-border bg-muted/30 text-muted-foreground"
+              )}
+            >
+              {done ? (
+                <Check className="h-3 w-3" />
+              ) : (
+                <span className="font-mono">{i + 1}</span>
+              )}
+              {s.label}
+            </div>
+            {i < steps.length - 1 && (
+              <div
+                className={cn(
+                  "h-px flex-1 transition-colors",
+                  done ? "bg-success/40" : "bg-border"
+                )}
+              />
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
 function Field({
-  label, value, onChange, type = "text",
-}: { label: string; value: string; onChange: (v: string) => void; type?: "text" | "password" }) {
+  id,
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: "text" | "password";
+}) {
   return (
-    <div>
-      <label className="block text-xs uppercase tracking-wide text-muted mb-1.5">{label}</label>
-      <input
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </Label>
+      <Input
+        id={id}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoComplete="off"
         spellCheck={false}
-        className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white placeholder:text-muted/60 focus:outline-none focus:border-accent"
       />
     </div>
-  );
-}
-
-function SubmitButton({
-  label, loading, disabled,
-}: { label: string; loading: boolean; disabled: boolean }) {
-  return (
-    <button
-      type="submit"
-      disabled={disabled || loading}
-      className="px-4 py-2 rounded-lg bg-accent text-black text-sm font-medium hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
-    >
-      {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-      {label}
-    </button>
   );
 }

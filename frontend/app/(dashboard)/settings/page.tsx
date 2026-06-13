@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Lock } from "lucide-react";
+
 import {
   useCredentials,
   useDeleteCoindcx,
@@ -13,6 +14,8 @@ import {
 } from "@/hooks/use-api";
 import { CredentialSection } from "@/components/settings/credential-section";
 import { CoindcxSetupGuide } from "@/components/onboarding/coindcx-setup-guide";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SettingsPage() {
   const { data, isLoading } = useCredentials();
@@ -31,27 +34,26 @@ export default function SettingsPage() {
   const [telegramTest, setTelegramTest] = useState<{ ok: boolean; message: string } | null>(null);
 
   if (isLoading || !data) {
-    return <div className="text-muted text-sm">Loading…</div>;
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-72" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
-        <p className="text-sm text-muted mt-1">
-          API credentials your bot uses. Encrypted at rest with AES-256-GCM —
-          even the database operator cannot read them.
-        </p>
-      </header>
-
-      <div className="bg-accent/5 border border-accent/20 rounded-xl p-4 flex items-start gap-3">
-        <Lock className="w-4 h-4 text-accent mt-0.5 shrink-0" />
-        <div className="text-sm text-muted">
-          Each credential is encrypted with a key unique to your account.
-          Saving runs a read-only round-trip against the provider — only verified
-          keys are persisted.
-        </div>
-      </div>
+    <div className="mx-auto max-w-2xl space-y-6">
+      <Alert className="border-primary/30 bg-primary/5">
+        <Lock className="h-4 w-4 text-primary" />
+        <AlertTitle className="text-foreground">Encrypted at rest</AlertTitle>
+        <AlertDescription>
+          Each credential is encrypted with a key unique to your account. Saving
+          runs a read-only round-trip against the provider — only verified keys
+          are persisted.
+        </AlertDescription>
+      </Alert>
 
       <CoindcxSetupGuide collapsible defaultOpen={false} />
 
@@ -60,7 +62,7 @@ export default function SettingsPage() {
         description="Used to place trades on your CoinDCX account. Restrict the key to trading + read (no withdrawals)."
         status={data.coindcx}
         fields={[
-          { name: "api_key",    label: "API Key",    placeholder: "Paste your CoinDCX API Key", type: "password" },
+          { name: "api_key", label: "API Key", placeholder: "Paste your CoinDCX API Key", type: "password" },
           { name: "api_secret", label: "API Secret", placeholder: "Paste your CoinDCX API Secret", type: "password" },
         ]}
         saving={saveCoindcx.isPending}
@@ -68,6 +70,7 @@ export default function SettingsPage() {
         deleting={deleteCoindcx.isPending}
         saveError={coindcxError}
         testResult={coindcxTest}
+        deleteConfirmation="Your bot will stop trading until you add new keys. This cannot be undone."
         onSave={(v) => {
           setCoindcxError(null);
           setCoindcxTest(null);
@@ -88,11 +91,7 @@ export default function SettingsPage() {
             onSuccess: (r) => setCoindcxTest(r),
           });
         }}
-        onDelete={() => {
-          if (confirm("Remove your CoinDCX credentials? Your bot will stop trading.")) {
-            deleteCoindcx.mutate();
-          }
-        }}
+        onDelete={() => deleteCoindcx.mutate()}
       />
 
       <CredentialSection
@@ -101,13 +100,14 @@ export default function SettingsPage() {
         status={data.telegram}
         fields={[
           { name: "bot_token", label: "Bot Token", placeholder: "1234567890:ABC-DEF...", type: "password" },
-          { name: "chat_id",   label: "Chat ID",   placeholder: "Your numeric chat ID", type: "text" },
+          { name: "chat_id", label: "Chat ID", placeholder: "Your numeric chat ID", type: "text" },
         ]}
         saving={saveTelegram.isPending}
         testing={testTelegram.isPending}
         deleting={deleteTelegram.isPending}
         saveError={telegramError}
         testResult={telegramTest}
+        deleteConfirmation="You will stop receiving trade alerts. This cannot be undone."
         onSave={(v) => {
           setTelegramError(null);
           setTelegramTest(null);
@@ -128,11 +128,7 @@ export default function SettingsPage() {
             onSuccess: (r) => setTelegramTest(r),
           });
         }}
-        onDelete={() => {
-          if (confirm("Remove your Telegram credentials? You will stop receiving trade alerts.")) {
-            deleteTelegram.mutate();
-          }
-        }}
+        onDelete={() => deleteTelegram.mutate()}
       />
     </div>
   );

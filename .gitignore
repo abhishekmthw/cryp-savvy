@@ -22,6 +22,10 @@ frontend/.next/
 frontend/out/
 *.tsbuildinfo
 
+# ── Brand assets (source files kept locally — committed copy lives in frontend/public/) ──
+/logo.png
+/logo.svg
+
 # ── Editor ────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/

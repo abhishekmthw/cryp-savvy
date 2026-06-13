@@ -9,15 +9,11 @@ import { LiveEvents } from "@/components/dashboard/live-events";
 export default function DashboardPage() {
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold text-white">Dashboard</h1>
-
       <BotControls />
 
-      {/* Row 1: Stat cards */}
       <StatCards />
 
-      {/* Row 2: Positions + Chart */}
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <div className="xl:col-span-3">
           <PositionsTable />
         </div>
@@ -26,9 +22,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Row 3: Recent trades + Live event feed */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <TradesFeed />
+        <SignalsTable />
         <LiveEvents />
       </div>
     </div>

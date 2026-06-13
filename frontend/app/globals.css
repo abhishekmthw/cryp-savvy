@@ -2,17 +2,146 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: dark;
+@layer base {
+  :root {
+    --background: 240 20% 99%;
+    --foreground: 240 10% 4%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 4%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 4%;
+
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+
+    --accent: 262 83% 96%;
+    --accent-foreground: 262 83% 28%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 142 71% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 45%;
+    --warning-foreground: 0 0% 100%;
+
+    --danger: 0 84% 55%;
+    --danger-foreground: 0 0% 100%;
+
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 262 83% 58%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 240 14% 5%;
+    --foreground: 240 5% 96%;
+
+    --card: 240 12% 8%;
+    --card-foreground: 240 5% 96%;
+
+    --popover: 240 12% 8%;
+    --popover-foreground: 240 5% 96%;
+
+    --primary: 263 80% 68%;
+    --primary-foreground: 240 12% 8%;
+
+    --secondary: 240 8% 14%;
+    --secondary-foreground: 240 5% 96%;
+
+    --muted: 240 8% 14%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 263 50% 22%;
+    --accent-foreground: 263 90% 92%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 142 70% 48%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 95% 60%;
+    --warning-foreground: 240 12% 8%;
+
+    --danger: 0 80% 62%;
+    --danger-foreground: 0 0% 100%;
+
+    --border: 240 8% 16%;
+    --input: 240 8% 16%;
+    --ring: 263 80% 68%;
+  }
 }
 
-body {
-  background-color: #0f172a;
-  color: #f1f5f9;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
 }
 
-/* Custom scrollbar for the dark theme */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #1e293b; }
-::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #64748b; }
+/* Scrollbar — themed via CSS variables */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Subtle radial backdrop on the dashboard */
+.app-backdrop {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, hsl(var(--primary) / 0.12), transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, hsl(var(--primary) / 0.08), transparent 55%);
+}
+
+/* Grid pattern overlay for hero panels */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, hsl(var(--border) / 0.6) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--border) / 0.6) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+}
+
+/* Glow ring used on the live status badge */
+.glow-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 4px hsl(var(--success) / 0.25);
+  animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  pointer-events: none;
+}
+
+/* Brand gradient text */
+.text-brand-gradient {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary)) 0%,
+    hsl(263 90% 75%) 50%,
+    hsl(var(--primary)) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

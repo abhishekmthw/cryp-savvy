@@ -10,6 +10,11 @@ import {
   X,
 } from "lucide-react";
 
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
+
 interface Props {
   defaultOpen?: boolean;
   collapsible?: boolean;
@@ -23,43 +28,30 @@ export function CoindcxSetupGuide({
   const isOpen = collapsible ? open : true;
 
   return (
-    <div className="bg-card border border-border rounded-xl p-5">
-      {collapsible ? (
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="w-full flex items-center justify-between text-left"
-          aria-expanded={isOpen}
-        >
+    <Card className="border-border/60 bg-card/70 backdrop-blur">
+      <CardHeader className={cn(collapsible && "cursor-pointer select-none")} onClick={collapsible ? () => setOpen((o) => !o) : undefined}>
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-white">
-              How do I get these keys?
-            </h3>
-            <p className="text-sm text-muted mt-1">
+            <CardTitle>{collapsible ? "How do I get these keys?" : "Get your CoinDCX API keys"}</CardTitle>
+            <CardDescription>
               Step-by-step CoinDCX setup — first time takes 1–3 days.
-            </p>
+            </CardDescription>
           </div>
-          <ChevronDown
-            className={`w-5 h-5 text-muted transition-transform shrink-0 ${
-              isOpen ? "rotate-180" : ""
-            }`}
-          />
-        </button>
-      ) : (
-        <header>
-          <h3 className="text-base font-semibold text-white">
-            Get your CoinDCX API keys
-          </h3>
-          <p className="text-sm text-muted mt-1">
-            Step-by-step — first time takes 1–3 days.
-          </p>
-        </header>
-      )}
+          {collapsible && (
+            <ChevronDown
+              className={cn(
+                "h-5 w-5 shrink-0 text-muted-foreground transition-transform",
+                isOpen && "rotate-180"
+              )}
+            />
+          )}
+        </div>
+      </CardHeader>
 
       {isOpen && (
-        <div className="mt-5 space-y-4">
+        <CardContent className="space-y-4">
           <Step n={1} title="Sign up at coindcx.com">
-            <p className="text-sm text-muted">
+            <p className="text-sm text-muted-foreground">
               New to CoinDCX? Create your account first.
             </p>
             <ExternalLinkButton href="https://coindcx.com">
@@ -69,15 +61,15 @@ export function CoindcxSetupGuide({
 
           <Step n={2} title="Complete KYC (PAN + Aadhaar)">
             <Callout tone="amber">
-              Takes <strong className="text-amber-200">1–3 business days</strong>.
-              The bot can&apos;t trade until KYC is verified.
+              Takes <strong>1–3 business days</strong>. The bot can&apos;t trade
+              until KYC is verified.
             </Callout>
           </Step>
 
           <Step n={3} title="Open the API Dashboard">
-            <p className="text-sm text-muted">
+            <p className="text-sm text-muted-foreground">
               Once verified:{" "}
-              <span className="text-white">
+              <span className="text-foreground">
                 Profile → API Dashboard → Create New API Key
               </span>
               .
@@ -89,20 +81,20 @@ export function CoindcxSetupGuide({
 
           <Step n={4} title="Copy your API Key and API Secret">
             <Callout tone="amber">
-              The <strong className="text-amber-200">Secret is shown only once</strong>.
-              Copy both before closing the dialog — you&apos;ll need to regenerate the
-              key if you lose it.
+              The <strong>Secret is shown only once</strong>. Copy both before
+              closing the dialog — you&apos;ll need to regenerate the key if you
+              lose it.
             </Callout>
           </Step>
 
           <Step n={5} title="Restrict the key's permissions">
             <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-sm text-emerald-300">
-                <Check className="w-4 h-4 shrink-0" />
+              <div className="flex items-center gap-2 text-sm text-success">
+                <Check className="h-4 w-4 shrink-0" />
                 Enable: <span className="font-medium">trading + read</span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-rose-300">
-                <X className="w-4 h-4 shrink-0" />
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <X className="h-4 w-4 shrink-0" />
                 <span>
                   Do <strong>NOT</strong> enable:{" "}
                   <span className="font-medium">withdrawals</span>
@@ -111,78 +103,55 @@ export function CoindcxSetupGuide({
             </div>
           </Step>
 
-          <div className="flex items-start gap-2 pt-2 border-t border-border text-sm text-muted">
-            <Lock className="w-4 h-4 text-accent mt-0.5 shrink-0" />
+          <Separator />
+
+          <div className="flex items-start gap-2 text-sm text-muted-foreground">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <span>
-              Your keys are encrypted at rest with AES-256-GCM using a key unique
-              to your account. We never log them.
+              Your keys are encrypted at rest with AES-256-GCM using a key
+              unique to your account. We never log them.
             </span>
           </div>
-        </div>
+        </CardContent>
       )}
-    </div>
+    </Card>
   );
 }
 
-function Step({
-  n,
-  title,
-  children,
-}: {
-  n: number;
-  title: string;
-  children: ReactNode;
-}) {
+function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="w-7 h-7 rounded-full border border-accent text-accent text-sm font-medium flex items-center justify-center shrink-0">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-sm font-semibold text-primary">
         {n}
       </div>
       <div className="flex-1 space-y-2">
-        <p className="text-sm font-medium text-white">{title}</p>
+        <p className="text-sm font-medium text-foreground">{title}</p>
         {children}
       </div>
     </div>
   );
 }
 
-function ExternalLinkButton({
-  href,
-  children,
-}: {
-  href: string;
-  children: ReactNode;
-}) {
+function ExternalLinkButton({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-white/5 text-white"
-    >
-      {children}
-      <ExternalLink className="w-3 h-3" />
-    </a>
+    <Button asChild size="sm" variant="outline">
+      <a href={href} target="_blank" rel="noreferrer">
+        {children}
+        <ExternalLink className="ml-1.5 h-3 w-3" />
+      </a>
+    </Button>
   );
 }
 
-function Callout({
-  tone,
-  children,
-}: {
-  tone: "amber" | "rose";
-  children: ReactNode;
-}) {
+function Callout({ tone, children }: { tone: "amber" | "rose"; children: ReactNode }) {
   const styles =
     tone === "amber"
-      ? "border-amber-500/30 bg-amber-500/5 text-amber-300"
-      : "border-rose-500/30 bg-rose-500/5 text-rose-300";
+      ? "border-warning/30 bg-warning/5 text-warning"
+      : "border-destructive/30 bg-destructive/5 text-destructive";
   return (
-    <div
-      className={`flex items-start gap-2 text-sm rounded-lg border p-2.5 ${styles}`}
-    >
-      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-      <span>{children}</span>
+    <div className={cn("flex items-start gap-2 rounded-lg border p-2.5 text-sm", styles)}>
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span className="text-foreground/90">{children}</span>
     </div>
   );
 }
