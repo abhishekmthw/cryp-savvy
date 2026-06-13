@@ -33,8 +33,15 @@ _NONCE_BYTES = 12  # AES-GCM standard
 def _decode_kek(value: str, label: str) -> bytes:
     if not value:
         raise RuntimeError(f"{label} is not set — refusing to start")
+    # Some env-var UIs (Railway, Heroku) and shells strip trailing '=' padding
+    # and surrounding whitespace from the pasted value. Restore both before
+    # decoding; the 32-byte length check below still rejects truncated keys.
+    cleaned = value.strip()
+    missing_padding = (-len(cleaned)) % 4
+    if missing_padding:
+        cleaned += "=" * missing_padding
     try:
-        kek = base64.urlsafe_b64decode(value.encode())
+        kek = base64.urlsafe_b64decode(cleaned.encode())
     except Exception as exc:
         raise RuntimeError(f"{label} is not valid urlsafe base64: {exc}")
     if len(kek) != 32:
