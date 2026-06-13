@@ -17,6 +17,16 @@ export function formatPct(value: number, decimals = 2) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(decimals)}%`;
 }
 
+export function formatQty(value: number) {
+  if (value === 0) return "0";
+  const abs = Math.abs(value);
+  const decimals = abs >= 1000 ? 2 : abs >= 1 ? 4 : abs >= 0.01 ? 6 : 8;
+  return value.toLocaleString("en-IN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  });
+}
+
 export function formatTs(ts: number) {
   return new Date(ts * 1000).toLocaleString("en-IN", {
     day: "2-digit",

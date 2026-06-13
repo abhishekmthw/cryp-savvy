@@ -18,18 +18,31 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatINR, formatPct, cn } from "@/lib/utils";
+import { formatINR, formatPct, formatQty, cn } from "@/lib/utils";
 
 export function PositionsTable() {
   const { data, isLoading } = usePositions();
   const positions = data?.positions ?? [];
+
+  const totals = positions.reduce(
+    (acc, p) => {
+      const value = p.qty * p.current_price;
+      acc.invested += p.amount_inr;
+      acc.value += value;
+      return acc;
+    },
+    { invested: 0, value: 0 },
+  );
+  const totalPnlPct =
+    totals.invested > 0 ? ((totals.value - totals.invested) / totals.invested) * 100 : 0;
+  const totalProfit = totalPnlPct >= 0;
 
   return (
     <Card className="h-full border-border/60 bg-card/70 backdrop-blur">
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-4">
         <div>
           <CardTitle className="text-base">Open Positions</CardTitle>
-          <CardDescription>Live unrealised P&amp;L</CardDescription>
+          <CardDescription>Live allocation &amp; unrealised P&amp;L</CardDescription>
         </div>
         <Badge variant="outline" className="border-border/60 font-mono">
           {positions.length} / 2
@@ -53,21 +66,29 @@ export function PositionsTable() {
           <Table>
             <TableHeader>
               <TableRow className="border-border/60 hover:bg-transparent">
-                <TableHead className="h-9 text-[11px] uppercase tracking-wider">Symbol</TableHead>
-                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Entry</TableHead>
-                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Current</TableHead>
-                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">P&amp;L</TableHead>
-                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Stop</TableHead>
-                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Target</TableHead>
+                <TableHead className="h-9 text-[11px] uppercase tracking-wider">Coin</TableHead>
+                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Qty</TableHead>
+                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Buy</TableHead>
+                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Price</TableHead>
+                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Invested</TableHead>
+                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Value</TableHead>
+                <TableHead className="h-9 text-right text-[11px] uppercase tracking-wider">Change</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {positions.map((p) => {
                 const profit = p.unrealised_pnl_pct >= 0;
+                const currentValue = p.qty * p.current_price;
                 return (
                   <TableRow key={p.symbol} className="border-border/60">
                     <TableCell className="font-semibold text-foreground">
-                      {p.symbol.split("/")[0]}
+                      <div>{p.symbol.split("/")[0]}</div>
+                      <div className="mt-0.5 text-[10px] font-normal text-muted-foreground">
+                        SL {formatINR(p.stop_loss)} · TP {formatINR(p.take_profit)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs text-foreground/90">
+                      {formatQty(p.qty)}
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground">
                       {formatINR(p.entry_price)}
@@ -75,23 +96,45 @@ export function PositionsTable() {
                     <TableCell className="text-right font-medium">
                       {formatINR(p.current_price)}
                     </TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      {formatINR(p.amount_inr)}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-foreground">
+                      {formatINR(currentValue)}
+                    </TableCell>
                     <TableCell
                       className={cn(
                         "text-right font-semibold",
-                        profit ? "text-success" : "text-destructive"
+                        profit ? "text-success" : "text-destructive",
                       )}
                     >
                       {formatPct(p.unrealised_pnl_pct)}
                     </TableCell>
-                    <TableCell className="text-right text-xs text-destructive/80">
-                      {formatINR(p.stop_loss)}
-                    </TableCell>
-                    <TableCell className="text-right text-xs text-success/80">
-                      {formatINR(p.take_profit)}
-                    </TableCell>
                   </TableRow>
                 );
               })}
+              <TableRow className="border-border/60 bg-muted/20 hover:bg-muted/20">
+                <TableCell className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Total
+                </TableCell>
+                <TableCell />
+                <TableCell />
+                <TableCell />
+                <TableCell className="text-right text-xs font-semibold text-foreground">
+                  {formatINR(totals.invested)}
+                </TableCell>
+                <TableCell className="text-right text-xs font-semibold text-foreground">
+                  {formatINR(totals.value)}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    "text-right text-xs font-bold",
+                    totalProfit ? "text-success" : "text-destructive",
+                  )}
+                >
+                  {formatPct(totalPnlPct)}
+                </TableCell>
+              </TableRow>
             </TableBody>
           </Table>
         )}

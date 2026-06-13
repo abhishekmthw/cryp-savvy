@@ -24,9 +24,9 @@ export function Sidebar() {
           <Image
             src="/logo.svg"
             alt="CrypSavvy"
-            width={20}
-            height={23}
-            className="h-[18px] w-auto"
+            width={26}
+            height={30}
+            className="h-[28px] w-auto"
             priority
           />
         </div>

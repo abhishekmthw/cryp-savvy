@@ -25,7 +25,7 @@ export default function SignInPage() {
           </p>
         </div>
         <div className="flex justify-center">
-          <SignIn />
+          <SignIn forceRedirectUrl="/" signUpForceRedirectUrl="/" />
         </div>
       </div>
     </div>
