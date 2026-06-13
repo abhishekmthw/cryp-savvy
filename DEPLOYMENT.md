@@ -18,26 +18,26 @@ Estimated total time: **2–4 hours** (excluding the 1–3 day CoinDCX KYC wait)
         │                                       (encrypted creds) │     │
         │                                              ▼              ▼
    ┌────┴─────┐    ┌──────────────┐            ┌─────────┐    ┌──────────┐
-   │  Clerk   │    │   Supabase   │ ◄──────────│ CoinDCX │    │CryptoPan.│
-   │  Auth    │    │  Postgres    │            │ exchange│    │  Reddit  │
+   │  Clerk   │    │   Supabase   │ ◄──────────│ CoinDCX │    │ RSS news │
+   │  Auth    │    │  Postgres    │            │ exchange│    │ + Reddit │
    └──────────┘    └──────────────┘            └─────────┘    └──────────┘
 ```
 
-> **Multi-tenant note:** Each user signs up via Clerk, then pastes their own CoinDCX (and optional Telegram) credentials in **Settings**. Those credentials are encrypted with AES-256-GCM and stored in Supabase Postgres — the database holds only ciphertext. Sentiment APIs (CryptoPanic + Reddit) are operator-shared and stay in Railway env vars.
+> **Multi-tenant note:** Each user signs up via Clerk, then pastes their own CoinDCX (and optional Telegram) credentials in **Settings**. Those credentials are encrypted with AES-256-GCM and stored in Supabase Postgres — the database holds only ciphertext. Sentiment data is pulled from public crypto-news RSS feeds (no key) and Reddit (operator-shared script app) — neither requires per-user setup.
 
 > **Monorepo note:** backend and frontend live in the same GitHub repo. Vercel and Railway both handle this cleanly via their **Root Directory** setting (`frontend` for Vercel, `backend` for Railway). Each platform builds only its subdirectory and ignores the other. By default, both rebuild on every push to `main` — see the optional optimization tips in Phase 3.2 (Railway Watch Paths) and Phase 4.1 (Vercel Ignored Build Step) to skip rebuilds when only the other project changed.
 
-You will need **7 free operator accounts**, plus end users supply their own CoinDCX/Telegram via the dashboard:
+You will need **6 free operator accounts**, plus end users supply their own CoinDCX/Telegram via the dashboard:
 
 | # | Service | Purpose | Cost |
 |---|---|---|---|
 | 1 | GitHub | Source code hosting | Free |
-| 2 | CryptoPanic | News sentiment data (operator-shared) | Free |
-| 3 | Reddit | Community sentiment data (operator-shared) | Free |
-| 4 | Clerk | User authentication | Free tier |
-| 5 | Supabase | Postgres for users + encrypted credentials | Free (500 MB) |
-| 6 | Railway | Backend hosting | $5/month free credit |
-| 7 | Vercel | Frontend hosting | Free |
+| 2 | Reddit | Community sentiment data (operator-shared) | Free |
+| 3 | Clerk | User authentication | Free tier |
+| 4 | Supabase | Postgres for users + encrypted credentials | Free (500 MB) |
+| 5 | Railway | Backend hosting | $5/month free credit |
+| 6 | Vercel | Frontend hosting | Free |
+| — | News RSS feeds | News sentiment data (operator-shared) — no signup, no key, no rate limit | Free |
 | — | CoinDCX | **Per-user** — each end user adds their own via Settings | Free + KYC |
 | — | Telegram | **Per-user** — each end user adds their own via Settings | Free |
 
@@ -67,11 +67,11 @@ section with them when they sign up.
 4. Save **API Key** and **API Secret** — you won't see the secret again
 5. Restrict the key to **trading + read** (not withdrawals)
 
-### 1.3 CryptoPanic (free tier)
+### 1.3 News RSS feeds (no signup required)
 
-1. Sign up at [cryptopanic.com](https://cryptopanic.com)
-2. Go to **Account → Developers → API Auth Token**
-3. Copy the token
+The bot pulls headlines from public crypto-news RSS feeds — currently CoinTelegraph, Decrypt, and U.Today — and scores them with VADER. **There is nothing to sign up for here.** The feed list lives in [`backend/src/data/sentiment.py`](backend/src/data/sentiment.py) under the `RSS_FEEDS` tuple; add or remove sources by editing that constant and redeploying.
+
+> Why RSS and not a hosted news API? Both CryptoPanic (pre-2026) and CryptoCompare (May 2026) retired their free tiers within months of each other. RSS feeds have no business model to retire and have been stable for a decade.
 
 ### 1.4 Reddit
 
@@ -229,8 +229,7 @@ MASTER_ENCRYPTION_KEY=<output of the python command in step 3.3>
 # Leave MASTER_ENCRYPTION_KEY_PREVIOUS unset for now — only used during key rotation
 
 # ── Operator-shared sentiment APIs ──────────────────────────────────────────
-CRYPTOPANIC_API_KEY=<from step 1.3>
-
+# News is pulled from public RSS feeds — no key needed (see step 1.3).
 REDDIT_CLIENT_ID=<from step 1.4>
 REDDIT_CLIENT_SECRET=<from step 1.4>
 REDDIT_USER_AGENT=crypto_bot/1.0 by <your_reddit_username>
@@ -419,6 +418,15 @@ For each user who wants to switch from paper to live:
 ### Telegram alerts not arriving
 - Make sure you sent at least one message to your bot first (Telegram requirement)
 - Verify `TELEGRAM_CHAT_ID` is your numeric ID (from @userinfobot), not a username
+
+### News-sentiment score stuck at 0 (neutral) for every coin
+- The bot scores headlines from the RSS feeds in `backend/src/data/sentiment.py` → `RSS_FEEDS`
+- Quick sanity check from any shell — should return XML with `<item>` elements:
+  ```bash
+  curl -A "Mozilla/5.0" https://cointelegraph.com/rss | head -c 500
+  ```
+- If a feed publisher kills their RSS (CoinDesk did this in early 2026), the corresponding fetch silently returns no items. Edit `RSS_FEEDS` to drop the dead source and add a new one
+- If you migrated from CryptoPanic or CryptoCompare, remove the stale `CRYPTOPANIC_API_KEY` / `CRYPTOCOMPARE_API_KEY` variables from Railway — they're no longer read
 
 ### Railway free credit running low
 - Check **Usage** tab — a paper-trading bot typically uses ₹40–100 worth of credits/month

@@ -25,7 +25,7 @@ MASTER_ENCRYPTION_KEY          = os.getenv("MASTER_ENCRYPTION_KEY", "")
 MASTER_ENCRYPTION_KEY_PREVIOUS = os.getenv("MASTER_ENCRYPTION_KEY_PREVIOUS", "")
 
 # ── Operator-owned sentiment APIs (shared across all users) ───────────────────
-CRYPTOPANIC_API_KEY  = os.getenv("CRYPTOPANIC_API_KEY", "")
+# News is pulled from public RSS feeds (no key needed) — see src/data/sentiment.py.
 REDDIT_CLIENT_ID     = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT    = os.getenv("REDDIT_USER_AGENT", "crypto_bot/1.0")

@@ -20,7 +20,7 @@ src/
     paper_trader.py             Simulation engine (fake balance/positions)
   data/
     market_data.py              OHLCV fetcher with 60s cache
-    sentiment.py                CryptoPanic + Reddit → score [-1, +1]
+    sentiment.py                RSS news feeds + Reddit → score [-1, +1]
   analysis/
     technical.py                EMA/RSI/MACD/Volume → score 0–100
     signal_engine.py            Weighted combiner → BUY/SELL/HOLD
@@ -70,7 +70,6 @@ pytest tests/ -v   # no network or API keys required
 |---|---|---|
 | `MODE` | Yes | `paper` or `live` |
 | `COINDCX_API_KEY` / `SECRET` | Live only | CoinDCX REST credentials |
-| `CRYPTOPANIC_API_KEY` | Recommended | Free tier |
 | `REDDIT_CLIENT_ID` / `SECRET` | Optional | Free script app |
 | `REDDIT_USER_AGENT` | Optional | |
 | `TELEGRAM_BOT_TOKEN` / `CHAT_ID` | Optional | Trade alerts |

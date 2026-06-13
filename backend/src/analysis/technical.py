@@ -4,7 +4,7 @@ Returns individual sub-scores (0–100) for each indicator.
 """
 
 import pandas as pd
-import pandas_ta as ta
+import pandas_ta_classic as ta
 from typing import Optional
 import sys, os
 

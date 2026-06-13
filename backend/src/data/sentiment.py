@@ -1,11 +1,13 @@
 """
 Sentiment data fetcher.
 Sources:
-  1. CryptoPanic API — aggregated news with sentiment labels
-  2. Reddit (PRAW)   — mention count from r/CryptoCurrency in the last hour
+  1. Public crypto news RSS feeds — VADER-scored headlines matching the coin
+  2. Reddit (PRAW)                — mention count from r/CryptoCurrency in the last hour
 """
 
+import re
 import time
+import xml.etree.ElementTree as ET
 import requests
 import praw
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -18,9 +20,21 @@ from config import settings
 
 _vader = SentimentIntensityAnalyzer()
 
-# Simple in-process cache to avoid hammering free-tier APIs
+# Per-symbol composite-score cache
 _sentiment_cache: dict[str, tuple[float, float]] = {}   # symbol → (ts, score)
 _CACHE_TTL = 300   # 5 minutes
+
+# Public RSS feeds — no signup, no key, no rate limit. Add/remove as needed.
+RSS_FEEDS = (
+    "https://cointelegraph.com/rss",
+    "https://decrypt.co/feed",
+    "https://u.today/rss",
+)
+_RSS_USER_AGENT = "Mozilla/5.0 (compatible; CrypSavvy/1.0)"
+
+# Feed-level cache so a single scan across N coins fetches each feed once.
+_news_items_cache: tuple[float, list[tuple[str, str]]] = (0.0, [])
+_NEWS_CACHE_TTL = 300
 
 
 def _coin_name(symbol: str) -> str:
@@ -28,52 +42,64 @@ def _coin_name(symbol: str) -> str:
     return symbol.split("/")[0].upper()
 
 
-# ── CryptoPanic ───────────────────────────────────────────────────────────────
+# ── RSS news ──────────────────────────────────────────────────────────────────
 
-def _fetch_cryptopanic_score(coin: str) -> float:
+def _fetch_news_items() -> list[tuple[str, str]]:
+    """Fetch + parse every RSS feed once; return cached [(title, description), ...]."""
+    global _news_items_cache
+    now = time.time()
+    cached_ts, cached_items = _news_items_cache
+    if cached_items and (now - cached_ts) < _NEWS_CACHE_TTL:
+        return cached_items
+
+    items: list[tuple[str, str]] = []
+    headers = {"User-Agent": _RSS_USER_AGENT}
+    for feed_url in RSS_FEEDS:
+        try:
+            resp = requests.get(feed_url, headers=headers, timeout=8)
+            resp.raise_for_status()
+            root = ET.fromstring(resp.content)
+        except Exception:
+            continue
+        for item in root.iter("item"):
+            title = (item.findtext("title") or "").strip()
+            desc  = (item.findtext("description") or "").strip()
+            if title:
+                items.append((title, desc))
+
+    _news_items_cache = (now, items)
+    return items
+
+
+def _fetch_rss_news_score(coin: str) -> float:
     """
-    Query CryptoPanic for recent news about `coin`.
-    Returns a sentiment score in [-1.0, +1.0]:
-      +1.0 = all positive, -1.0 = all negative, 0.0 = neutral / no data.
-    Falls back to 0.0 on any error.
+    Score recent news headlines against `coin`.
+    Returns a sentiment score in [-1.0, +1.0] from VADER analysis of matching
+    titles; 0.0 on no matches or any error.
+
+    RSS feeds are not coin-filtered, so we substring-match the ticker as a
+    whole word. Coverage is strong for majors (BTC, ETH, SOL…) and thinner
+    for long-tail alts — fine because the bot scans top-momentum coins.
     """
-    if not settings.CRYPTOPANIC_API_KEY:
+    items = _fetch_news_items()
+    if not items:
         return 0.0
 
-    url = "https://cryptopanic.com/api/v1/posts/"
-    params = {
-        "auth_token": settings.CRYPTOPANIC_API_KEY,
-        "currencies": coin,
-        "public": "true",
-        "filter": "hot",
-        "limit": 10,
-    }
-    try:
-        resp = requests.get(url, params=params, timeout=8)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception:
-        return 0.0
+    pattern = re.compile(rf"\b{re.escape(coin.upper())}\b", re.IGNORECASE)
 
-    results = data.get("results", [])
-    if not results:
-        return 0.0
-
-    # CryptoPanic provides a "votes" object per post: positive / negative / important
     pos_total = neg_total = 0
-    for post in results:
-        votes = post.get("votes", {})
-        pos_total += votes.get("positive", 0) + votes.get("important", 0)
-        neg_total += votes.get("negative", 0)
-
-        # Also run VADER on the headline for additional signal
-        title = post.get("title", "")
-        if title:
-            score = _vader.polarity_scores(title)["compound"]
-            if score > 0.05:
-                pos_total += 1
-            elif score < -0.05:
-                neg_total += 1
+    matched = 0
+    for title, desc in items:
+        if not pattern.search(f"{title} {desc}"):
+            continue
+        matched += 1
+        score = _vader.polarity_scores(title)["compound"]
+        if score > 0.05:
+            pos_total += 1
+        elif score < -0.05:
+            neg_total += 1
+        if matched >= 20:
+            break
 
     total = pos_total + neg_total
     if total == 0:
@@ -154,14 +180,14 @@ def get_sentiment_score(symbol: str) -> float:
         return cached[1]
 
     coin = _coin_name(symbol)
-    cp_score     = _fetch_cryptopanic_score(coin)    # [-1, +1]
+    news_score   = _fetch_rss_news_score(coin)       # [-1, +1]
     reddit_score = _fetch_reddit_score(coin)         # [-1, +1]
 
     # Average both sources (each equally weighted within the sentiment block)
     if settings.REDDIT_CLIENT_ID:
-        combined = (cp_score + reddit_score) / 2
+        combined = (news_score + reddit_score) / 2
     else:
-        combined = cp_score   # Fallback to CryptoPanic only
+        combined = news_score   # Fallback to news only
 
     _sentiment_cache[symbol] = (now, combined)
     return combined
