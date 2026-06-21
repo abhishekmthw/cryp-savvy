@@ -205,7 +205,8 @@ def create_app(scanner: MarketDataScanner, orchestrator: BotOrchestrator) -> Fas
                 return {"positions": positions}
             for sym, pos in state.paper_trader.positions.items():
                 price = state.current_prices.get(sym, pos.entry_price)
-                upnl  = (price - pos.entry_price) / pos.entry_price * 100
+                upnl  = ((price - pos.entry_price) / pos.entry_price * 100
+                         if pos.entry_price else 0.0)
                 positions.append({
                     "symbol":             sym,
                     "entry_price":        pos.entry_price,

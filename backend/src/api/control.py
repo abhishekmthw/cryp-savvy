@@ -17,8 +17,12 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from config import settings
 from src.api.deps import get_current_user
+from src.bot.errors import BotStartError
 from src.db.models import User
+from src.monitoring.logger import get_logger
 
+
+log = get_logger()
 
 router = APIRouter(prefix="/api/bot", tags=["bot"])
 
@@ -35,7 +39,16 @@ def _orch(request: Request):
 @router.post("/start")
 async def start_bot(request: Request,
                     user: Annotated[User, Depends(get_current_user)]):
-    ok = _orch(request).start(user.clerk_user_id)
+    try:
+        ok = _orch(request).start(user.clerk_user_id)
+    except BotStartError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except Exception:
+        log.exception("Unexpected error starting bot for %s", user.clerk_user_id[:8])
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to start the bot due to a server error.",
+        )
     if not ok:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -70,5 +83,15 @@ async def set_mode(body: ModeIn, request: Request,
                 400,
                 detail="Switching to live trading requires confirm='I_ACCEPT_LIVE_RISK'",
             )
-    _orch(request).set_mode(user.clerk_user_id, body.mode)
+    try:
+        _orch(request).set_mode(user.clerk_user_id, body.mode)
+    except BotStartError as exc:
+        # Mode switch restarts the bot, which can hit the same decryption failure.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except Exception:
+        log.exception("Unexpected error switching mode for %s", user.clerk_user_id[:8])
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to switch mode due to a server error.",
+        )
     return {"ok": True, "mode": body.mode}

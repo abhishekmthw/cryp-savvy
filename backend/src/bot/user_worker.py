@@ -20,10 +20,13 @@ import threading
 import time
 from typing import Optional
 
+from cryptography.exceptions import InvalidTag
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from config import settings
 from src.analysis.signal_engine import analyse_open_position, analyse_symbol, Signal
 from src.bot.config import BotConfig
+from src.bot.errors import BotStartError
 from src.bot.scanner import MarketDataScanner
 from src.db.engine import session_scope
 from src.db import repositories as repo
@@ -394,8 +397,20 @@ def build_user_bot(user_id: str, scanner: MarketDataScanner,
         cfg = BotConfig.from_user_row(cfg_row)
         mode = user.mode
 
-        # Decrypt credentials if present (CoinDCX is required only for live mode)
-        dek = vault.unwrap_dek(user.wrapped_dek, user.dek_nonce)
+        # Decrypt credentials if present (CoinDCX is required only for live mode).
+        # An InvalidTag here means the deployment's MASTER_ENCRYPTION_KEY no longer
+        # matches the key these credentials were wrapped with — surface a clear,
+        # actionable message instead of letting it bubble up as a bare 500.
+        try:
+            dek = vault.unwrap_dek(user.wrapped_dek, user.dek_nonce)
+        except InvalidTag as exc:
+            log.warning("DEK unwrap failed for %s — KEK mismatch", user_id[:8])
+            raise BotStartError(
+                "Saved credentials can't be decrypted. The encryption key on this "
+                "deployment doesn't match the one used when they were saved. "
+                "Re-save your CoinDCX keys in Settings, or restore the original "
+                "MASTER_ENCRYPTION_KEY."
+            ) from exc
 
         api_key = api_secret = ""
         ck = repo.get_credential(db, user_id, P_COINDCX_KEY)
