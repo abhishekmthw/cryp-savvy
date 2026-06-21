@@ -176,7 +176,7 @@ export default function OnboardingPage() {
                 <CardTitle>You&apos;re ready.</CardTitle>
                 <CardDescription className="mt-1">
                   Your bot defaults to <strong className="text-foreground">paper mode</strong>{" "}
-                  with ₹10,000 starting balance. Start it from the dashboard whenever
+                  with $10,000 starting balance. Start it from the dashboard whenever
                   you&apos;re ready. You can edit credentials anytime in Settings.
                 </CardDescription>
               </div>

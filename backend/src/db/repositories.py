@@ -10,7 +10,7 @@ control the transaction boundary via ``session_scope()``.
 from __future__ import annotations
 
 import time
-from typing import Iterable, Optional
+from typing import Optional
 
 from sqlalchemy import case, desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -20,7 +20,10 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from config import settings
-from src.db.models import Position, Trade, User, UserBotConfig, UserCredential
+from src.db.models import (
+    Allocation, BucketState, Order, Position, Trade, User, UserBotConfig,
+    UserCredential,
+)
 from src.security.crypto import CredentialVault
 
 
@@ -58,14 +61,14 @@ def get_user_or_create(
 
     db.add(UserBotConfig(
         user_id=clerk_user_id,
-        initial_capital_inr=settings.INITIAL_CAPITAL_INR,
-        max_position_inr=settings.MAX_POSITION_INR,
+        initial_capital_usdt=settings.INITIAL_CAPITAL_USDT,
+        max_position_usdt=settings.MAX_POSITION_USDT,
         max_open_positions=settings.MAX_OPEN_POSITIONS,
         stop_loss_pct=settings.STOP_LOSS_PCT,
         take_profit_pct=settings.TAKE_PROFIT_PCT,
         trailing_stop_trigger=settings.TRAILING_STOP_TRIGGER,
         trailing_stop_offset=settings.TRAILING_STOP_OFFSET,
-        daily_loss_limit_inr=settings.DAILY_LOSS_LIMIT_INR,
+        daily_loss_limit_usdt=settings.DAILY_LOSS_LIMIT_USDT,
     ))
 
     db.flush()
@@ -135,7 +138,7 @@ def record_trade(db: Session, *, user_id: str, trade: dict) -> None:
         entry_price=trade.get("entry_price"),
         exit_price=trade.get("exit_price"),
         qty=trade.get("qty"),
-        amount_inr=trade.get("amount_inr"),
+        amount_usdt=trade.get("amount_usdt"),
         proceeds=trade.get("proceeds"),
         pnl=trade.get("pnl"),
         pnl_pct=trade.get("pnl_pct"),
@@ -152,13 +155,15 @@ def trades_for_user(db: Session, user_id: str, limit: int = 50, offset: int = 0)
         .order_by(desc(Trade.ts))
         .limit(limit).offset(offset)
     ).scalars()
+    def _f(v):  # Numeric columns read back as Decimal — cast to float for JSON
+        return float(v) if v is not None else None
     return [{
         "symbol":      t.symbol,
         "side":        t.side,
-        "entry_price": t.entry_price,
-        "exit_price":  t.exit_price,
-        "pnl":         t.pnl,
-        "pnl_pct":     t.pnl_pct,
+        "entry_price": _f(t.entry_price),
+        "exit_price":  _f(t.exit_price),
+        "pnl":         _f(t.pnl),
+        "pnl_pct":     _f(t.pnl_pct),
         "reason":      t.reason,
         "ts":          t.ts,
     } for t in rows]
@@ -248,10 +253,95 @@ def positions_for_user(db: Session, user_id: str) -> list[Position]:
     ).scalars())
 
 
+# ── Orders (idempotent intent log) ───────────────────────────────────────────
+
+def create_order(db: Session, *, user_id: str, client_order_id: str, symbol: str,
+                 side: str, mode: str, quote_currency: str = "USDT",
+                 requested_amount: float | None = None,
+                 requested_qty: float | None = None,
+                 requested_price: float | None = None,
+                 reason: str | None = None) -> None:
+    db.add(Order(
+        id=client_order_id, user_id=user_id, symbol=symbol, side=side, mode=mode,
+        status="pending", quote_currency=quote_currency,
+        requested_amount=requested_amount, requested_qty=requested_qty,
+        requested_price=requested_price, reason=reason,
+    ))
+
+
+def update_order(db: Session, client_order_id: str, **fields) -> None:
+    order = db.get(Order, client_order_id)
+    if order is None:
+        return
+    for k, v in fields.items():
+        setattr(order, k, v)
+
+
+# ── Daily realized P&L (restart-safe loss-limit recovery) ─────────────────────
+
+def daily_realized_pnl(db: Session, user_id: str, day_start_ts: float) -> float:
+    """Sum of realized P&L from trades since ``day_start_ts`` (epoch seconds)."""
+    val = db.execute(
+        select(func.coalesce(func.sum(Trade.pnl), 0.0))
+        .where(Trade.user_id == user_id, Trade.ts >= day_start_ts)
+    ).scalar()
+    return float(val or 0.0)
+
+
 # ── Bot config ───────────────────────────────────────────────────────────────
 
 def get_bot_config(db: Session, user_id: str) -> UserBotConfig | None:
     return db.get(UserBotConfig, user_id)
+
+
+# ── Allocation + bucket state ─────────────────────────────────────────────────
+
+def get_allocation(db: Session, user_id: str) -> Allocation | None:
+    return db.get(Allocation, user_id)
+
+
+def upsert_allocation(db: Session, *, user_id: str, total: float, day_budget: float,
+                      long_budget: float, allocate_all: bool,
+                      base_currency: str = "USDT", status: str = "active") -> None:
+    stmt = pg_insert(Allocation).values(
+        user_id=user_id, base_currency=base_currency, total_allocated=total,
+        day_budget=day_budget, long_budget=long_budget, allocate_all=allocate_all,
+        status=status,
+    ).on_conflict_do_update(
+        index_elements=[Allocation.user_id],
+        set_={
+            "total_allocated": total, "day_budget": day_budget,
+            "long_budget": long_budget, "allocate_all": allocate_all,
+            "base_currency": base_currency, "status": status,
+        },
+    )
+    db.execute(stmt)
+
+
+def set_allocation_status(db: Session, user_id: str, status: str) -> None:
+    alloc = db.get(Allocation, user_id)
+    if alloc is not None:
+        alloc.status = status
+
+
+def get_bucket_states(db: Session, user_id: str) -> list[BucketState]:
+    return list(db.execute(
+        select(BucketState).where(BucketState.user_id == user_id)
+    ).scalars())
+
+
+def upsert_bucket_state(db: Session, *, user_id: str, bucket: str,
+                        realized_pnl: float, peak_equity: float,
+                        drawdown_state: str) -> None:
+    stmt = pg_insert(BucketState).values(
+        user_id=user_id, bucket=bucket, realized_pnl=realized_pnl,
+        peak_equity=peak_equity, drawdown_state=drawdown_state,
+    ).on_conflict_do_update(
+        index_elements=[BucketState.user_id, BucketState.bucket],
+        set_={"realized_pnl": realized_pnl, "peak_equity": peak_equity,
+              "drawdown_state": drawdown_state},
+    )
+    db.execute(stmt)
 
 
 # ── Internal ─────────────────────────────────────────────────────────────────

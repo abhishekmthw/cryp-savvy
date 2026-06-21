@@ -1,0 +1,52 @@
+name: Build & push backend image (OCI/VM alternative)
+
+# NOTE: The active deployment path is Fly.io (see fly-deploy.yml). This workflow is for
+# the ALTERNATIVE self-hosted OCI / VM path (deploy/README.md) and is therefore
+# MANUAL-ONLY (workflow_dispatch) — it does not run on push, so it won't double-build
+# alongside the Fly deploy. Trigger it from the Actions tab if you use the VM path.
+#
+# It builds the backend image and pushes it to GHCR. Multi-arch (arm64 + amd64) is
+# REQUIRED: the OCI Ampere A1 VM is arm64 (an amd64-only image would "exec format
+# error"); amd64 is kept for the x86 E2.1.Micro fallback shape.
+
+on:
+  workflow_dispatch: {}
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/crypsavvy-backend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

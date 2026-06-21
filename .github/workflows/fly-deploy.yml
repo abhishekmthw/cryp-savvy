@@ -1,0 +1,33 @@
+name: Deploy backend to Fly.io
+
+# Auto-deploys the CrypSavvy backend to Fly.io on every push to `main` that touches
+# backend/. This is the "git push = deploy" pipeline. Fly's remote builders build the
+# image from backend/Dockerfile — no Docker needed in CI.
+#
+# One-time setup: create a deploy token and add it as a GitHub Actions secret named
+# FLY_API_TOKEN:
+#   fly tokens create deploy -x 8760h
+# (see deploy/FLY-SETUP-GUIDE.md, Part 7)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/fly-deploy.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fly-deploy-backend
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        working-directory: backend     # picks up backend/fly.toml + backend/Dockerfile
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

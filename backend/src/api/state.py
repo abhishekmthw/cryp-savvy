@@ -25,7 +25,8 @@ class UserBotState:
     last_scan_time: float = 0.0
     current_prices: dict = field(default_factory=dict)
 
-    event_queue: queue.Queue = field(default_factory=queue.Queue)
+    # Bounded so a disconnected client can't make the queue grow without limit.
+    event_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=500))
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def update_scan(self, signals: list, prices: dict):
@@ -35,8 +36,30 @@ class UserBotState:
             self.last_scan_time = time.time()
 
     def push_event(self, event_type: str, data: dict):
-        if self.event_queue.qsize() < 500:
-            self.event_queue.put_nowait({"type": event_type, "data": data})
+        # Atomic check-and-put: drop the OLDEST event if the queue is full so the
+        # most recent state always gets through (and a torn qsize() check can't
+        # let it grow past the cap).
+        event = {"type": event_type, "data": data}
+        try:
+            self.event_queue.put_nowait(event)
+        except queue.Full:
+            try:
+                self.event_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self.event_queue.put_nowait(event)
+            except queue.Full:
+                pass
+
+    def drain_queue(self) -> None:
+        """Discard any buffered events — called when a socket disconnects so a
+        reconnecting client doesn't receive a backlog of stale events."""
+        while True:
+            try:
+                self.event_queue.get_nowait()
+            except queue.Empty:
+                return
 
 
 # Backwards-compat alias — some imports still say ``BotState``

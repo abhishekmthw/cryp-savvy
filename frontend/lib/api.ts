@@ -8,7 +8,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface PortfolioSummary {
-  balance_inr: number;
+  balance_usdt: number;
   open_positions: number;
   portfolio_value: number;
   total_pnl: number;
@@ -32,7 +32,7 @@ export interface Position {
   entry_price: number;
   current_price: number;
   qty: number;
-  amount_inr: number;
+  amount_usdt: number;
   stop_loss: number;
   take_profit: number;
   unrealised_pnl_pct: number;
@@ -85,6 +85,23 @@ export interface CredentialsSummary {
   telegram: ProviderStatus;
 }
 
+export interface BucketView {
+  budget: number;
+  realized_pnl: number;
+  deployed: number;
+  available: number;
+  equity: number;
+  drawdown_state: "normal" | "reduced" | "halted" | "paused";
+}
+
+export interface AllocationView {
+  allocated: boolean;
+  total_allocated?: number;
+  allocate_all?: boolean;
+  status?: "active" | "paused" | "withdrawn";
+  buckets?: { day: BucketView; long: BucketView };
+}
+
 // ── Fetch helper ───────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -128,6 +145,11 @@ async function apiFetch<T>(
 export const api = {
   status: (token: string) =>
     apiFetch<BotStatus>("/api/status", token),
+
+  // Mint a short-lived, single-use ticket for the WebSocket handshake so the
+  // Clerk JWT never appears in the WS URL.
+  wsTicket: (token: string) =>
+    apiFetch<{ ticket: string }>("/api/ws/token", token, { method: "POST" }),
 
   portfolio: (token: string) =>
     apiFetch<{ summary: PortfolioSummary; stats: PortfolioStats }>("/api/portfolio", token),
@@ -180,6 +202,22 @@ export const api = {
         "/api/credentials/telegram/test",
         token,
         { method: "POST" },
+      ),
+  },
+
+  allocation: {
+    get: (token: string) => apiFetch<AllocationView>("/api/allocation", token),
+    set: (token: string, body: { total: number; day_pct: number; allocate_all: boolean }) =>
+      apiFetch<{ ok: boolean; day_budget: number; long_budget: number }>(
+        "/api/allocation", token, { method: "POST", body: JSON.stringify(body) },
+      ),
+    pause: (token: string) =>
+      apiFetch<{ ok: boolean; status: string }>("/api/allocation/pause", token, { method: "POST" }),
+    resume: (token: string) =>
+      apiFetch<{ ok: boolean; status: string }>("/api/allocation/resume", token, { method: "POST" }),
+    confirmShift: (token: string, body: { day_pct: number }) =>
+      apiFetch<{ ok: boolean; day_budget: number; long_budget: number }>(
+        "/api/allocation/confirm-shift", token, { method: "POST", body: JSON.stringify(body) },
       ),
   },
 

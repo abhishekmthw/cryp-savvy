@@ -1,0 +1,55 @@
+# CrypSavvy backend — OCI Always Free deployment stack.
+#
+# Copy this file + a filled-in .env (from .env.example) to the VM (e.g. ~/crypsavvy/)
+# and run:
+#   docker compose up -d
+#
+# The env file MUST be named `.env` — Compose auto-loads it both for ${VAR}
+# interpolation below (e.g. CF_TUNNEL_TOKEN, BACKEND_IMAGE) AND, via `env_file:`,
+# to inject config into the backend container. No CLI flag needed.
+#
+# Three services:
+#   backend     — the trading bot + FastAPI (uvicorn :8000), reached only over the
+#                 internal compose network. No host port is published (no `ports:`).
+#   cloudflared — Cloudflare Tunnel; dials OUT to Cloudflare's edge and forwards
+#                 api.<domain> → http://backend:8000. Provides HTTPS + wss:// with
+#                 zero inbound ports opened on the VM.
+#   watchtower  — polls GHCR every 60s and recreates `backend` when :latest changes
+#                 (the "git push = deploy" half of the pipeline).
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/abhishekmthw/crypsavvy-backend:latest}
+    container_name: backend
+    env_file:
+      - .env
+    expose:
+      - "8000"            # internal-only; cloudflared reaches it as http://backend:8000
+    restart: unless-stopped
+    labels:
+      # Opt this container in to Watchtower auto-updates.
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    # --label-enable: only watch containers that opted in (just `backend` here),
+    # so Watchtower never tries to update cloudflared/itself.
+    command: --label-enable --cleanup --interval 60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount the VM's docker creds so Watchtower can pull a PRIVATE GHCR image.
+      # Created by `docker login ghcr.io` on the VM. Remove this line if the
+      # GHCR package is public.
+      - ${HOME}/.docker/config.json:/config.json:ro
+    restart: unless-stopped

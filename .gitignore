@@ -2,6 +2,9 @@
 .env
 .env.local
 .env*.local
+# deploy/.env (OCI VM secrets) is already matched by `.env` above; guard the
+# old `.env.production` name too, defensively. The *.example templates stay tracked.
+.env.production
 
 # ── Backend runtime data ──────────────────────────────────────────────────────
 backend/data/

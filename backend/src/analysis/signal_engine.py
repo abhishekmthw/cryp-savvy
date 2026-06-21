@@ -8,6 +8,7 @@ import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from config import settings
+from src.analysis import strategies
 from src.analysis.technical import compute_indicators
 from src.data.sentiment import get_sentiment_score, sentiment_to_score_0_100
 from src.data.market_data import MarketData
@@ -22,7 +23,10 @@ class Signal:
 def analyse_symbol(symbol: str, market_data: MarketData) -> dict:
     """
     Full analysis pipeline for one symbol.
-    Returns a dict with the composite score and the recommended action.
+
+    The regime-aware strategy ensemble decides the entry/exit and the capital
+    bucket (day vs long); the composite technical+sentiment score is layered on
+    as a quality gate so a BUY only fires when conviction clears BUY_THRESHOLD.
     """
     result = {
         "symbol":          symbol,
@@ -30,6 +34,10 @@ def analyse_symbol(symbol: str, market_data: MarketData) -> dict:
         "composite_score": 0.0,
         "technical_score": 0.0,
         "sentiment_score": 50.0,
+        "regime":          None,
+        "bucket":          None,
+        "strategy":        "none",
+        "atr":             None,
         "details":         {},
     }
 
@@ -44,22 +52,23 @@ def analyse_symbol(symbol: str, market_data: MarketData) -> dict:
 
     technical_score = float(tech["technical_total"])   # 0–100
 
-    # 2. Sentiment analysis
+    # 2. Sentiment analysis (capped to ≤10% weight until validated)
     sentiment_raw   = get_sentiment_score(symbol)      # -1 to +1
     sentiment_score = sentiment_to_score_0_100(sentiment_raw)  # 0–100
 
-    # 3. Composite weighted score
+    # 3. Composite weighted score (quality gate)
     composite = (
         technical_score * settings.TECHNICAL_WEIGHT
         + sentiment_score * settings.SENTIMENT_WEIGHT
     )
 
-    # 4. Decision
-    if composite >= settings.BUY_THRESHOLD:
-        action = Signal.BUY
-    elif composite <= settings.SELL_THRESHOLD:
-        action = Signal.SELL
-    else:
+    # 4. Regime-aware strategy decision
+    strat = strategies.evaluate(df, tech)
+    action = strat["action"]
+
+    # 5. Quality gate: a BUY must also clear the composite threshold; a strategy
+    #    SELL always passes (exits are not gated).
+    if action == Signal.BUY and composite < settings.BUY_THRESHOLD:
         action = Signal.HOLD
 
     result.update({
@@ -67,6 +76,10 @@ def analyse_symbol(symbol: str, market_data: MarketData) -> dict:
         "composite_score": round(composite, 2),
         "technical_score": round(technical_score, 2),
         "sentiment_score": round(sentiment_score, 2),
+        "regime":          strat["regime"],
+        "bucket":          strat["bucket"],
+        "strategy":        strat["strategy"],
+        "atr":             strat["atr"],
         "details":         tech,
     })
     return result

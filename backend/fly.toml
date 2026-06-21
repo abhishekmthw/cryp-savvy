@@ -1,0 +1,35 @@
+# fly.toml — CrypSavvy backend on Fly.io
+#
+# Deploy from this (backend/) directory:  fly deploy
+# Full walkthrough: ../deploy/FLY-SETUP-GUIDE.md
+#
+# Secrets (DATABASE_URL, MASTER_ENCRYPTION_KEY, CLERK_JWKS_URL, API_CORS_ORIGINS,
+# REDDIT_*) are NOT stored here — set them with `fly secrets set …` (see the guide).
+
+app = "crypsavvy-backend"
+primary_region = "bom"          # Mumbai — lowest latency to CoinDCX
+
+[build]
+  dockerfile = "Dockerfile"     # reuses the existing image build as-is
+
+[env]
+  PORT = "8000"                 # uvicorn binds 0.0.0.0:8000 (see src/runner.py)
+
+[http_service]
+  internal_port = 8000
+  force_https = true            # gives https:// + wss:// automatically
+  auto_stop_machines = "off"    # NEVER scale to zero — the bot must scan 24/7
+  auto_start_machines = true
+  min_machines_running = 1      # keep exactly one always-on instance
+
+  # Restart the machine if the scanner thread dies / the event loop hangs.
+  [[http_service.checks]]
+    method = "get"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"              # pandas headroom; bump with `fly scale memory 1024` if OOM-killed

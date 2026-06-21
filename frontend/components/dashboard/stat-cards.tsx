@@ -5,7 +5,7 @@ import { Wallet, TrendingUp, TrendingDown, BarChart2 } from "lucide-react";
 import { usePortfolio } from "@/hooks/use-api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatINR, formatPct, cn } from "@/lib/utils";
+import { formatUSD, formatPct, cn } from "@/lib/utils";
 
 interface StatProps {
   title: string;
@@ -96,19 +96,19 @@ export function StatCards() {
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         title="Balance"
-        value={formatINR(summary.balance_inr)}
+        value={formatUSD(summary.balance_usdt)}
         sub={`${summary.open_positions} position${summary.open_positions !== 1 ? "s" : ""} open`}
         icon={Wallet}
       />
       <StatCard
         title="Portfolio Value"
-        value={formatINR(summary.portfolio_value)}
+        value={formatUSD(summary.portfolio_value)}
         sub={`${stats.total_trades} trades total`}
         icon={BarChart2}
       />
       <StatCard
         title="Total P&L"
-        value={formatINR(summary.total_pnl)}
+        value={formatUSD(summary.total_pnl)}
         sub={`Win rate ${stats.win_rate.toFixed(1)}%`}
         positive={summary.total_pnl >= 0}
         icon={summary.total_pnl >= 0 ? TrendingUp : TrendingDown}
@@ -116,7 +116,7 @@ export function StatCards() {
       />
       <StatCard
         title="Today's P&L"
-        value={formatINR(summary.daily_pnl)}
+        value={formatUSD(summary.daily_pnl)}
         sub={`Avg ${formatPct(stats.avg_pnl_pct)} per trade`}
         positive={summary.daily_pnl >= 0}
         icon={summary.daily_pnl >= 0 ? TrendingUp : TrendingDown}

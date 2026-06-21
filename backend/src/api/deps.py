@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-from src.api.auth import verify_clerk_token
+from src.api.auth import is_valid_clerk_sub, verify_clerk_token
 from src.db.engine import session_scope
 from src.db.models import User
 from src.db import repositories as repo
@@ -55,16 +55,11 @@ async def get_current_user(
 ) -> User:
     payload = await verify_clerk_token(creds.credentials)
     sub = payload.get("sub")
-    if not sub:
+    if not is_valid_clerk_sub(sub):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing subject",
+            detail="Invalid authentication token",
         )
     email = payload.get("email") or payload.get("primary_email_address")
     user = repo.get_user_or_create(db, clerk_user_id=sub, email=email, vault=vault)
     return user
-
-
-async def get_current_user_id(user: Annotated[User, Depends(get_current_user)]) -> str:
-    """Convenience for routes that only need the ID, not the row."""
-    return user.clerk_user_id

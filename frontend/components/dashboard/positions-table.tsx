@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatINR, formatPct, formatQty, cn } from "@/lib/utils";
+import { formatUSD, formatPct, formatQty, cn } from "@/lib/utils";
 
 export function PositionsTable() {
   const { data, isLoading } = usePositions();
@@ -27,7 +27,7 @@ export function PositionsTable() {
   const totals = positions.reduce(
     (acc, p) => {
       const value = p.qty * p.current_price;
-      acc.invested += p.amount_inr;
+      acc.invested += p.amount_usdt;
       acc.value += value;
       return acc;
     },
@@ -84,23 +84,23 @@ export function PositionsTable() {
                     <TableCell className="font-semibold text-foreground">
                       <div>{p.symbol.split("/")[0]}</div>
                       <div className="mt-0.5 text-[10px] font-normal text-muted-foreground">
-                        SL {formatINR(p.stop_loss)} · TP {formatINR(p.take_profit)}
+                        SL {formatUSD(p.stop_loss)} · TP {formatUSD(p.take_profit)}
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs text-foreground/90">
                       {formatQty(p.qty)}
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground">
-                      {formatINR(p.entry_price)}
+                      {formatUSD(p.entry_price)}
                     </TableCell>
                     <TableCell className="text-right font-medium">
-                      {formatINR(p.current_price)}
+                      {formatUSD(p.current_price)}
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground">
-                      {formatINR(p.amount_inr)}
+                      {formatUSD(p.amount_usdt)}
                     </TableCell>
                     <TableCell className="text-right font-semibold text-foreground">
-                      {formatINR(currentValue)}
+                      {formatUSD(currentValue)}
                     </TableCell>
                     <TableCell
                       className={cn(
@@ -121,10 +121,10 @@ export function PositionsTable() {
                 <TableCell />
                 <TableCell />
                 <TableCell className="text-right text-xs font-semibold text-foreground">
-                  {formatINR(totals.invested)}
+                  {formatUSD(totals.invested)}
                 </TableCell>
                 <TableCell className="text-right text-xs font-semibold text-foreground">
-                  {formatINR(totals.value)}
+                  {formatUSD(totals.value)}
                 </TableCell>
                 <TableCell
                   className={cn(

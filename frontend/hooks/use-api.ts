@@ -9,7 +9,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-const REFETCH_INTERVAL = 30_000; // 30 s fallback polling (WebSocket is the primary path)
+const REFETCH_INTERVAL = 15_000; // 15 s fallback polling (WebSocket price_update is the primary path)
 
 function useToken() {
   const { getToken } = useAuth();
@@ -91,6 +91,47 @@ export function useSignals() {
       return api.signals(token);
     },
     refetchInterval: REFETCH_INTERVAL,
+  });
+}
+
+// ── Capital allocation ────────────────────────────────────────────────────────
+
+export function useAllocation() {
+  const getToken = useToken();
+  return useQuery({
+    queryKey: ["allocation"],
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.allocation.get(token);
+    },
+    refetchInterval: REFETCH_INTERVAL,
+  });
+}
+
+export function useSetAllocation() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { total: number; day_pct: number; allocate_all: boolean }) => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.allocation.set(token, body);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["allocation"] }),
+  });
+}
+
+export function usePauseAllocation() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (resume: boolean) => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return resume ? api.allocation.resume(token) : api.allocation.pause(token);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["allocation"] }),
   });
 }
 

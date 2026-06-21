@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatINR } from "@/lib/utils";
+import { formatUSD } from "@/lib/utils";
 
 type Unit = "sec" | "min" | "hour" | "day";
 
@@ -85,7 +85,7 @@ function ChartTooltip({ active, payload, label }: any) {
     <div className="rounded-lg border border-border/60 bg-popover/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
       <p className="text-muted-foreground">{formatFull(Number(label))}</p>
       <p className="mt-0.5 font-semibold text-foreground">
-        {formatINR(payload[0].value as number)}
+        {formatUSD(payload[0].value as number)}
       </p>
     </div>
   );
@@ -174,7 +174,7 @@ export function PnlChart() {
                 padding={{ left: 8, right: 12 }}
               />
               <YAxis
-                tickFormatter={(v) => `₹${(v / 1000).toFixed(1)}k`}
+                tickFormatter={(v) => `$${(v / 1000).toFixed(1)}k`}
                 tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}

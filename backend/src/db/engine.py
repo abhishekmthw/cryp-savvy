@@ -26,8 +26,9 @@ def _make_engine():
     return create_engine(
         settings.DATABASE_URL,
         pool_pre_ping=True,   # detect dropped connections (Supabase pooler closes idle ones)
-        pool_size=5,
-        max_overflow=10,
+        pool_size=20,         # raised for multi-user concurrency (front Supabase with PgBouncer)
+        max_overflow=20,
+        pool_recycle=1800,    # recycle connections before Supabase's idle timeout
         future=True,
     )
 

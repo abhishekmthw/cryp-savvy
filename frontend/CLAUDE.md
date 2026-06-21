@@ -4,7 +4,7 @@
 
 Next.js 14 (App Router) dashboard for **CrypSavvy**.
 Authentication via **Clerk**. Real-time data via **WebSocket** + **TanStack Query**.
-Deploys to **Vercel** (set Root Directory = `frontend`).
+All money is shown in **USDT** (`formatUSD`). Deploys to **Vercel** (Root Directory = `frontend`).
 
 ---
 
@@ -14,38 +14,40 @@ Deploys to **Vercel** (set Root Directory = `frontend`).
 app/
   layout.tsx                    Root layout — ClerkProvider + Providers
   (auth)/
-    sign-in/[[...sign-in]]/     Clerk sign-in page (public)
-    sign-up/[[...sign-up]]/     Clerk sign-up page (public)
-  (dashboard)/                  Route group — shared Sidebar+Navbar layout, no URL prefix
-    layout.tsx                  Protected layout — Sidebar + Navbar
-    page.tsx                    Main dashboard at /   (stat cards, positions, chart, feeds)
-    trades/page.tsx             Full trade history table at /trades
-    signals/page.tsx            Full signal scanner table at /signals
+    sign-in/[[...sign-in]]/     Clerk sign-in (public)
+    sign-up/[[...sign-up]]/     Clerk sign-up (public)
+  (dashboard)/                  Route group — shared Sidebar+Navbar, no URL prefix
+    layout.tsx                  Protected layout (Sidebar + Navbar + OnboardingGuard)
+    page.tsx                    Main dashboard at /
+    trades/page.tsx             Full trade history at /trades
+    signals/page.tsx            Full signal scanner at /signals
     settings/page.tsx           Per-user credentials + bot config at /settings
+    settings/allocation/page.tsx  Capital allocation (day/long buckets) at /settings/allocation
     onboarding/page.tsx         First-run setup wizard at /onboarding
 components/
   providers.tsx                 QueryClientProvider (client component)
-  layout/
-    sidebar.tsx                 Left nav (Dashboard / Trades / Signals)
-    navbar.tsx                  Top bar — BotStatus + Clerk UserButton
+  onboarding-guard.tsx          Redirects to /onboarding until CoinDCX creds exist
+  layout/                       sidebar (Dashboard/Trades/Signals/Allocation/Settings), navbar, nav-items
   dashboard/
     bot-status.tsx              Running indicator + WS connection badge
-    stat-cards.tsx              Balance, portfolio value, total P&L, daily P&L
-    positions-table.tsx         Live open positions with unrealised P&L
+    bot-controls.tsx            Start/stop + paper/live toggle (live = confirm dialog)
+    stat-cards.tsx              Balance, portfolio value, total/daily P&L
+    positions-table.tsx         Live open positions (current_price patched via WS)
     pnl-chart.tsx               Portfolio value area chart (Recharts)
-    trades-feed.tsx             Last 10 trades widget
+    trades-feed.tsx             Last 10 trades
     live-events.tsx             Real-time WebSocket event feed
-    signals-table.tsx           Top 6 signals widget
-    full-trades-table.tsx       Paginated trade history (Trades page)
-    full-signals-table.tsx      All signals with score bars (Signals page)
+    signals-table.tsx           Top signals widget
+    full-trades-table.tsx / full-signals-table.tsx
+  settings/credential-section.tsx   CoinDCX/Telegram credential entry (masked)
+  onboarding/coindcx-setup-guide.tsx
 hooks/
-  use-api.ts                    React Query hooks for every API endpoint
-  use-websocket.ts              WebSocket connection + query invalidation
+  use-api.ts                    React Query hooks (incl. useAllocation + mutations)
+  use-websocket.ts              WS connection + cache patching/invalidation
 lib/
-  api.ts                        Typed fetch client — all API calls live here
-  ws.ts                         WebSocket factory with auto-reconnect
-  utils.ts                      cn(), formatINR(), formatPct(), formatTs()
-middleware.ts                   Clerk auth middleware — protects /dashboard/*
+  api.ts                        Typed fetch client — all API calls + types
+  ws.ts                         WebSocket factory: ticket handshake + reconnect w/ jitter
+  utils.ts                      cn(), formatUSD(), formatPct(), formatQty(), formatTs()
+middleware.ts                   Clerk auth middleware
 ```
 
 ---
@@ -54,11 +56,11 @@ middleware.ts                   Clerk auth middleware — protects /dashboard/*
 
 ```bash
 npm install
-cp .env.example .env.local   # fill in Clerk keys + backend URL
+cp .env.example .env.local   # Clerk keys + backend URL
 npm run dev                  # http://localhost:3000
 ```
 
-The backend must be running at `NEXT_PUBLIC_API_URL` (default: `http://localhost:8000`).
+The backend must be running at `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`).
 
 ---
 
@@ -66,84 +68,67 @@ The backend must be running at `NEXT_PUBLIC_API_URL` (default: `http://localhost
 
 | Variable | Required | Notes |
 |---|---|---|
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Yes | From Clerk Dashboard → API Keys |
-| `CLERK_SECRET_KEY` | Yes | Server-side Clerk key |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | Yes | `/sign-in` |
-| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Yes | `/sign-up` |
-| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | Yes | `/dashboard` |
-| `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | Yes | `/dashboard` |
-| `NEXT_PUBLIC_API_URL` | Yes | Backend URL (`https://api.<domain>` in prod, via Cloudflare Tunnel) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` | Yes | Clerk Dashboard → API Keys |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `SIGN_UP_URL` / `AFTER_*` | Yes | Auth routing |
+| `NEXT_PUBLIC_API_URL` | Yes | Backend URL (`https://…fly.dev` in prod) |
 | `NEXT_PUBLIC_WS_URL` | Yes | WebSocket URL (`wss://` in prod) |
+
+`NEXT_PUBLIC_*` vars are embedded in the browser bundle — never put secrets there.
 
 ---
 
 ## Authentication Flow
 
 ```
-User visits /dashboard
-  → middleware.ts checks Clerk session
-  → Not signed in → redirect to /sign-in
-  → Clerk issues session + JWT
-  → Dashboard loads
-
-API calls (lib/api.ts):
-  → useAuth().getToken() → Clerk JWT
-  → fetch(API_URL + path, { Authorization: Bearer <jwt> })
-  → Python backend verifies JWT via JWKS
+REST: useAuth().getToken() → fetch(API_URL, { Authorization: Bearer <jwt> })
+      backend verifies the JWT via Clerk JWKS.
 
 WebSocket (lib/ws.ts):
-  → wss://backend/ws?token=<clerk_jwt>
-  → Python backend verifies token on connect
+  1. POST /api/ws/token  (with the Clerk JWT)  → single-use ticket
+  2. open wss://backend/ws?ticket=<ticket>     ← JWT is NEVER put in the URL
+  A fresh ticket is fetched before every (re)connect (tickets are single-use).
 ```
 
 ---
 
-## Data Flow
+## Data Flow (real-time)
 
 ```
-React Query (30s polling) ←──── REST API (portfolio, positions, trades, signals)
-                                       ↑
-                             Clerk JWT on every request
+React Query (15s fallback polling) ←──── REST API (portfolio, positions, trades, signals, allocation)
 
-WebSocket events ──────────────────→ invalidate React Query cache
-  scan_complete  → invalidates signals, status
-  trade_buy/sell → invalidates portfolio, positions, trades, portfolioHistory
+WebSocket events:
+  price_update    → setQueryData PATCHES ['positions']/['portfolio']/['status'] in place
+                    (no refetch — live prices/P&L update instantly, exchange-style)
+  trade_buy/sell  → invalidate portfolio, positions, trades, portfolioHistory
+  scan_complete   → invalidate signals, status
+  shift_suggestion / bucket_drawdown → surfaced in the live-events feed
 ```
+
+Prefer **patching** the cache (`setQueryData`) for high-frequency events and
+**invalidating** only for discrete ones. Polling is a fallback for when the WS drops.
 
 ---
 
 ## Vercel Deployment
 
-1. Push repo to GitHub
-2. Vercel → New Project → Import Git repo
-3. Framework Preset: **Next.js** (auto-detected)
-4. **Root Directory = `frontend`**
-5. Add all env vars from `.env.example` in the Environment Variables section
-6. Deploy
-
-After deploy, update `API_CORS_ORIGINS` in the backend's `.env` on the OCI VM
-to include the Vercel URL (e.g. `https://crypsavvy-dashboard.vercel.app`), then
-`docker compose up -d` to apply. See [../deploy/README.md](../deploy/README.md).
+1. Import the repo → Framework: **Next.js** → **Root Directory = `frontend`**.
+2. Add all env vars from `.env.example`.
+3. After deploy, add the Vercel URL to the backend's `API_CORS_ORIGINS`
+   (`fly secrets set API_CORS_ORIGINS="…"`). See [../deploy/FLY-SETUP-GUIDE.md](../deploy/FLY-SETUP-GUIDE.md).
 
 ---
 
-## Adding a New Page
+## Adding a New Page / Endpoint
 
-1. Create `app/(dashboard)/new-page/page.tsx`
-2. Add a nav entry in `components/layout/sidebar.tsx`
-3. Add the API call to `lib/api.ts` and a hook to `hooks/use-api.ts`
-
-## Adding a New API Endpoint
-
-1. Add the typed response interface in `lib/api.ts`
-2. Add the fetch function to the `api` object in `lib/api.ts`
-3. Add a `useXxx()` hook in `hooks/use-api.ts`
-4. Use the hook in a component
+- **Page**: `app/(dashboard)/<name>/page.tsx` → add a nav entry in `components/layout/nav-items.ts`.
+- **Endpoint**: add the typed response + fetch fn in `lib/api.ts` → a `useXxx()` hook in
+  `hooks/use-api.ts` → use it in a component.
 
 ---
 
 ## Warnings
 
-- Never commit `.env.local` — it contains real Clerk keys
-- `NEXT_PUBLIC_*` vars are embedded in the browser bundle — never put secrets there
-- Always use `wss://` (not `ws://`) for WebSocket in production
+- Never commit `.env.local`.
+- Always use `wss://` (not `ws://`) for WebSocket in production.
+- Allocating capital in **live** mode commits real USDT — the UI warns, and the
+  backend hard-gates live mode until validation is complete.

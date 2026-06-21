@@ -47,9 +47,3 @@ class MarketData:
             return float(ticker["last"])
         except Exception:
             return None
-
-    def get_top_momentum_symbols(self) -> list[str]:
-        try:
-            return self._client.get_top_momentum_symbols()
-        except Exception:
-            return []

@@ -1,8 +1,8 @@
 """
 Structured logger.
 - Local / TTY: Rich-formatted coloured output + log file.
-- Headless / Railway / Docker: plain timestamped stdout (no ANSI codes)
-  so Railway's log viewer displays clean, searchable lines.
+- Headless / Docker / cloud: plain timestamped stdout (no ANSI codes)
+  so cloud log viewers display clean, searchable lines.
 """
 
 import logging
@@ -38,13 +38,13 @@ def get_logger(name: str = "crypsavvy") -> logging.Logger:
             console_handler.setLevel(log_level)
             logger.addHandler(console_handler)
         else:
-            # Headless / cloud — plain stdout so Railway logs stay clean
+            # Headless / cloud — plain stdout so cloud logs stay clean
             stream_handler = logging.StreamHandler(sys.stdout)
             stream_handler.setLevel(log_level)
             stream_handler.setFormatter(_PLAIN_FMT)
             logger.addHandler(stream_handler)
 
-        # File handler (skipped in Docker/Railway — logs go to stdout only)
+        # File handler (skipped in Docker/cloud — logs go to stdout only)
         if sys.stdout.isatty():
             log_path = os.path.abspath(settings.LOG_FILE)
             os.makedirs(os.path.dirname(log_path), exist_ok=True)

@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Prevent .pyc files and enable unbuffered stdout (essential for Railway logs)
+# Prevent .pyc files and enable unbuffered stdout (essential for container logs)
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 

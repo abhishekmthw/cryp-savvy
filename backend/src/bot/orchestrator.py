@@ -101,7 +101,7 @@ class BotOrchestrator:
             cfg = BotConfig.from_user_row(row)
 
         stub_paper = PaperTrader(cfg)
-        stub_portfolio = Portfolio(user_id=user_id, initial_capital_inr=cfg.initial_capital_inr)
+        stub_portfolio = Portfolio(user_id=user_id, initial_capital_usdt=cfg.initial_capital_usdt)
         return UserBotState(
             user_id=user_id,
             paper_trader=stub_paper,

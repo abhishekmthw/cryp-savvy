@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { formatINR, formatPct, formatTs, cn } from "@/lib/utils";
+import { formatUSD, formatPct, formatTs, cn } from "@/lib/utils";
 
 export function FullTradesTable() {
   const { data, isLoading } = useTrades(200);
@@ -75,10 +75,10 @@ export function FullTradesTable() {
                         {t.symbol.split("/")[0]}
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground">
-                        {formatINR(t.entry_price)}
+                        {formatUSD(t.entry_price)}
                       </TableCell>
                       <TableCell className="text-right">
-                        {formatINR(t.exit_price)}
+                        {formatUSD(t.exit_price)}
                       </TableCell>
                       <TableCell
                         className={cn(
@@ -86,7 +86,7 @@ export function FullTradesTable() {
                           profit ? "text-success" : "text-destructive"
                         )}
                       >
-                        {formatINR(t.pnl)}
+                        {formatUSD(t.pnl)}
                       </TableCell>
                       <TableCell
                         className={cn(

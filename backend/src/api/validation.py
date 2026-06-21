@@ -10,9 +10,17 @@ keys that actually work.
 
 from __future__ import annotations
 
+from src.monitoring.logger import get_logger
+
+log = get_logger()
+
 
 def validate_coindcx(api_key: str, api_secret: str) -> tuple[bool, str]:
-    """Verify CoinDCX keys via a read-only ``fetch_balance`` call."""
+    """Verify CoinDCX keys via a read-only ``fetch_balance`` call.
+
+    Returns only fixed, non-sensitive messages — full exception detail (which
+    may echo the request/signature) is logged server-side, never returned.
+    """
     if not api_key or not api_secret:
         return False, "missing_credentials"
     try:
@@ -24,10 +32,12 @@ def validate_coindcx(api_key: str, api_secret: str) -> tuple[bool, str]:
     except requests.HTTPError as exc:
         # CoinDCX returns 401 on bad keys, 400 on malformed signature
         if exc.response is not None and exc.response.status_code in (400, 401):
-            return False, f"authentication_failed: {exc}"
-        return False, f"network_or_provider_error: {exc}"
+            return False, "authentication_failed"
+        log.warning("CoinDCX validation provider error: %s", exc)
+        return False, "network_or_provider_error"
     except Exception as exc:
-        return False, f"network_or_provider_error: {exc}"
+        log.warning("CoinDCX validation error: %s", exc)
+        return False, "network_or_provider_error"
 
 
 async def validate_telegram(bot_token: str, chat_id: str) -> tuple[bool, str]:
@@ -56,4 +66,5 @@ async def validate_telegram(bot_token: str, chat_id: str) -> tuple[bool, str]:
             return False, "invalid_bot_token"
         if "chat not found" in msg or "chat_id is empty" in msg:
             return False, "invalid_chat_id"
-        return False, f"telegram_error: {exc}"
+        log.warning("Telegram validation error: %s", exc)
+        return False, "telegram_error"

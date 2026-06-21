@@ -9,7 +9,7 @@ exist only in process memory for the duration of a request.
 
 Threat model: an attacker with full read access to Postgres sees random bytes
 and cannot recover any plaintext credential without also obtaining the KEK
-from Railway env vars.
+from the host's environment.
 
 KEK rotation: set ``MASTER_ENCRYPTION_KEY_PREVIOUS`` to the old key while the
 new one is active. ``unwrap_dek`` will try the current key first, then fall
@@ -33,7 +33,7 @@ _NONCE_BYTES = 12  # AES-GCM standard
 def _decode_kek(value: str, label: str) -> bytes:
     if not value:
         raise RuntimeError(f"{label} is not set — refusing to start")
-    # Some env-var UIs (Railway, Heroku) and shells strip trailing '=' padding
+    # Some env-var UIs and shells strip trailing '=' padding
     # and surrounding whitespace from the pasted value. Restore both before
     # decoding; the 32-byte length check below still rejects truncated keys.
     cleaned = value.strip()

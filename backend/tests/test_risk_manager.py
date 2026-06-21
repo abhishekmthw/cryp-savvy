@@ -25,7 +25,7 @@ def cfg():
 def trader(cfg):
     t = PaperTrader(cfg)
     # Override balance to a known value for deterministic tests
-    t.balance_inr = 10_000.0
+    t.balance_usdt = 10_000.0
     return t
 
 
@@ -43,13 +43,15 @@ class TestPaperTraderBuy:
         assert "BTC/INR" in trader.positions
 
     def test_buy_deducts_balance(self, trader):
-        trader.place_market_buy("BTC/INR", 2_000, current_price=5_000_000)
-        assert trader.balance_inr == pytest.approx(8_000.0, abs=1)
+        before = trader.balance_usdt
+        pos = trader.place_market_buy("BTC/INR", 2_000, current_price=5_000_000)
+        assert trader.balance_usdt == pytest.approx(before - pos.amount_usdt, abs=1e-6)
 
     def test_buy_sets_stop_loss_and_take_profit(self, trader):
+        # No ATR passed → falls back to fixed-pct stops off the (slipped) entry.
         pos = trader.place_market_buy("BTC/INR", 2_000, current_price=100)
-        assert pos.stop_loss  == pytest.approx(100 * (1 - settings.STOP_LOSS_PCT),   rel=1e-4)
-        assert pos.take_profit == pytest.approx(100 * (1 + settings.TAKE_PROFIT_PCT), rel=1e-4)
+        assert pos.stop_loss  == pytest.approx(pos.entry_price * (1 - settings.STOP_LOSS_PCT),   rel=1e-4)
+        assert pos.take_profit == pytest.approx(pos.entry_price * (1 + settings.TAKE_PROFIT_PCT), rel=1e-4)
 
     def test_duplicate_buy_rejected(self, trader):
         trader.place_market_buy("BTC/INR", 2_000, current_price=100)
@@ -65,7 +67,7 @@ class TestPaperTraderBuy:
     def test_buy_capped_at_max_position_inr(self, trader):
         pos = trader.place_market_buy("BTC/INR", 999_999, current_price=100)
         assert pos is not None
-        assert pos.amount_inr <= settings.MAX_POSITION_INR
+        assert pos.amount_usdt <= settings.MAX_POSITION_USDT
 
 
 # ── PaperTrader: sell ─────────────────────────────────────────────────────────
@@ -78,15 +80,17 @@ class TestPaperTraderSell:
         assert "BTC/INR" not in trader.positions
 
     def test_sell_returns_proceeds(self, trader):
-        trader.place_market_buy("BTC/INR", 1_000, current_price=100)
+        pos = trader.place_market_buy("BTC/INR", 1_000, current_price=100)
         trade = trader.place_market_sell("BTC/INR", 110)
-        assert trade["proceeds"] == pytest.approx(1_100.0, rel=1e-3)
+        # proceeds are net of fee + slippage (~0.15%), so close to qty*110 but a touch under
+        assert trade["proceeds"] == pytest.approx(pos.qty * 110, rel=0.01)
+        assert trade["proceeds"] < pos.qty * 110
 
     def test_profitable_sell_adds_to_balance(self, trader):
-        before = trader.balance_inr
+        before = trader.balance_usdt
         trader.place_market_buy("BTC/INR", 1_000, current_price=100)
         trader.place_market_sell("BTC/INR", 110)
-        assert trader.balance_inr > before
+        assert trader.balance_usdt > before
 
     def test_sell_nonexistent_position_returns_none(self, trader):
         result = trader.place_market_sell("GHOST/INR", 100)
@@ -119,14 +123,15 @@ class TestDailyLossLimit:
         assert not trader.is_daily_limit_hit
 
     def test_limit_hit_after_large_loss(self, trader):
-        trader.place_market_buy("BTC/INR", 2_000, current_price=100)
-        # Sell at a price that causes > DAILY_LOSS_LIMIT_INR loss
-        crash_price = 100 * (1 - settings.DAILY_LOSS_LIMIT_INR / 2_000 - 0.01)
+        pos = trader.place_market_buy("BTC/INR", 10_000, current_price=100)
+        # Sell at a price that loses > the daily limit on this position's size.
+        loss_needed = settings.DAILY_LOSS_LIMIT_USDT + 1
+        crash_price = pos.entry_price - (loss_needed / pos.qty)
         trader.place_market_sell("BTC/INR", crash_price)
         assert trader.is_daily_limit_hit
 
     def test_buy_blocked_when_limit_hit(self, trader, risk):
-        trader._daily_pnl = -settings.DAILY_LOSS_LIMIT_INR - 1
+        trader._daily_pnl = -settings.DAILY_LOSS_LIMIT_USDT - 1
         allowed, _ = risk.can_open_position("BTC/INR")
         assert not allowed
 
@@ -140,6 +145,6 @@ class TestRiskManager:
         assert reason == "ok"
 
     def test_position_size_respects_cap(self, risk, trader):
-        size = risk.position_size_inr()
-        assert size <= settings.MAX_POSITION_INR
-        assert size <= trader.balance_inr
+        size = risk.position_size_usdt()
+        assert size <= settings.MAX_POSITION_USDT
+        assert size <= trader.balance_usdt

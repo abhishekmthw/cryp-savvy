@@ -2,47 +2,74 @@
 
 ## What this is
 
-Python service for **CrypSavvy** that does two things in one process:
-1. **Trading bot loop** — scans CoinDCX every 5 min, scores coins, executes trades
-2. **FastAPI server** — exposes REST + WebSocket for the Next.js dashboard (runs in a daemon thread)
+Python service for **CrypSavvy** that does three things in one process:
+1. **Market scanner** — a shared thread that ranks the USDT universe every 5 min
+   AND a fast price-monitor (~15 s) that keeps live prices fresh.
+2. **Per-user trading bots** — one worker thread per active user; scores coins,
+   routes entries to a day/long capital bucket, executes trades.
+3. **FastAPI server** — REST + WebSocket for the Next.js dashboard (daemon thread).
 
-Deploys to **Railway** (set Root Directory = `backend`).
+Trades **USDT-quoted pairs** on CoinDCX (BTC/USDT, ETH/USDT, …). Deploys to
+**Fly.io** (Mumbai) via [`fly.toml`](fly.toml) — see [../deploy/FLY-SETUP-GUIDE.md](../deploy/FLY-SETUP-GUIDE.md).
 
 ---
 
 ## Architecture
 
 ```
-config/settings.py              All tunable parameters + env var loading
+config/settings.py              All tunable params + env loading (USDT, ATR, Kelly,
+                                drawdown breakers, regime, fees/slippage, live gate)
 src/
   exchange/
-    coindcx_client.py           CoinDCX REST API (direct — ccxt has no coindcx)
-    paper_trader.py             Simulation engine (fake balance/positions)
+    coindcx_client.py           CoinDCX REST (retry/backoff + circuit breaker;
+                                idempotent order create; fill reconciliation)
+    paper_trader.py             Per-user sim book (ATR stops, fees/slippage,
+                                per-bucket accounting, restart restore)
   data/
     market_data.py              OHLCV fetcher with 60s cache
-    sentiment.py                RSS news feeds + Reddit → score [-1, +1]
+    sentiment.py                RSS news + Reddit → score (weight capped ≤10%)
   analysis/
-    technical.py                EMA/RSI/MACD/Volume → score 0–100
-    signal_engine.py            Weighted combiner → BUY/SELL/HOLD
+    indicators.py               ATR, Donchian, ROC, SMA (pure helpers)
+    regime.py                   bull / bear / sideways detection (meta-layer)
+    strategies.py               regime-aware ensemble → action + day/long bucket
+    technical.py                EMA/RSI/MACD/Volume sub-scores
+    signal_engine.py            strategy + composite-score quality gate
   trading/
-    risk_manager.py             Position limits, daily loss cap
-    order_manager.py            Routes orders to paper or live
-    portfolio.py                SQLite trade history + pnl_history()
-  monitoring/
-    logger.py                   Rich (TTY) or plain stdout (Railway)
-    alerts.py                   Telegram fire-and-forget
-    dashboard.py                Rich table (TTY) or one-line log (headless)
+    risk_manager.py             bucket-aware gating + fractional-Kelly/ATR sizing
+    order_manager.py            order state machine (pending→filled), live/paper sync
+    portfolio.py                DB facade (trades, positions, orders, allocation)
+    allocation.py               AllocationManager — day/long buckets, drawdown breakers
+  bot/
+    config.py                   BotConfig dataclass (per-user, from DB row)
+    scanner.py                  MarketDataScanner (slow universe scan + fast price loop)
+    user_worker.py              UserBot: main tick + fast SL/TP loop + bucket routing
+    orchestrator.py             BotOrchestrator — per-user worker pool
+  backtest/
+    engine.py                   historical replay + walk-forward
+    metrics.py                  Sharpe, max-DD, profit factor, win-rate, expectancy
+    run.py                      validation gate runner (GO / NO-GO)
+  monitoring/                   logger, Telegram alerts, dashboard
+  security/crypto.py            envelope encryption (KEK→DEK) for user credentials
+  db/
+    engine.py                   SQLAlchemy engine + session_scope (TLS-enforced)
+    models.py                   users, user_credentials, user_bot_config, trades,
+                                positions, orders, allocations, bucket_state
+    repositories.py             the only place user-scoped queries live
   api/
-    state.py                    BotState — thread-safe shared memory
-    auth.py                     Clerk JWKS verification (cached 1 h)
-    main.py                     FastAPI app: REST routes + WebSocket
-  bot.py                        Entry point — starts API thread, runs bot loop
-tests/
-  test_signals.py
-  test_risk_manager.py
-data/                           Created at runtime (SQLite + log file)
-Dockerfile
-railway.toml
+    state.py                    UserBotState — thread-safe shared memory (bounded queue)
+    auth.py                     Clerk JWKS verification (cached 30 min, kid-miss refresh)
+    deps.py                     get_current_user (+ Clerk sub validation), get_vault
+    ratelimit.py                per-IP sliding-window limiter
+    ws_tickets.py               single-use WebSocket handshake tickets
+    credentials.py              per-user CoinDCX/Telegram credential CRUD + validate
+    control.py                  start/stop/mode (live mode hard-gated)
+    allocation.py               capital-allocation endpoints
+    validation.py               read-only credential validation (sanitized errors)
+    main.py                     FastAPI app: middleware, /health, REST, WS
+  runner.py                     Entry point — scanner + orchestrator + API thread
+migrations/                     Alembic (0001 multi-tenant → 0004 allocation)
+tests/                          pytest (no network/keys; uses fakes)
+Dockerfile / fly.toml
 ```
 
 ---
@@ -51,15 +78,15 @@ railway.toml
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # fill in keys
-python src/runner.py
-# API available at http://localhost:8000
+cp .env.example .env   # fill in keys (DATABASE_URL + MASTER_ENCRYPTION_KEY required)
+python src/runner.py   # API on http://localhost:8000
 ```
 
-## Running tests
+## Running tests / backtest
 
 ```bash
-pytest tests/ -v   # no network or API keys required
+pytest tests/ -v                       # no network or API keys required
+python -m src.backtest.run BTC/USDT ETH/USDT   # walk-forward GO/NO-GO gate (needs network)
 ```
 
 ---
@@ -68,38 +95,48 @@ pytest tests/ -v   # no network or API keys required
 
 | Variable | Required | Notes |
 |---|---|---|
-| `MODE` | Yes | `paper` or `live` |
-| `COINDCX_API_KEY` / `SECRET` | Live only | CoinDCX REST credentials |
-| `REDDIT_CLIENT_ID` / `SECRET` | Optional | Free script app |
-| `REDDIT_USER_AGENT` | Optional | |
-| `TELEGRAM_BOT_TOKEN` / `CHAT_ID` | Optional | Trade alerts |
-| `API_CORS_ORIGINS` | Yes (prod) | Comma-separated frontend URLs |
+| `DATABASE_URL` | Yes | Postgres/Supabase. TLS (`sslmode=require`) auto-enforced for remote hosts |
+| `MASTER_ENCRYPTION_KEY` | Yes | Base64 32-byte KEK; app refuses to start without it. **Reuse the same key** or stored credentials can't be decrypted |
+| `MASTER_ENCRYPTION_KEY_PREVIOUS` | No | Decrypt-only fallback during KEK rotation |
 | `CLERK_JWKS_URL` | Yes (prod) | `https://<domain>/.well-known/jwks.json` |
-| `PORT` | Auto (Railway) | Injected by Railway; defaults to 8000 |
+| `API_CORS_ORIGINS` | Yes (prod) | Comma-separated frontend URLs (also used for the Origin/CSRF check) |
+| `LIVE_TRADING_ENABLED` | No | **Default `false`.** Live mode is refused until set `true` (validation gate) |
+| `REDDIT_CLIENT_ID` / `SECRET` / `USER_AGENT` | No | Optional sentiment |
+| `PORT` | No | uvicorn bind port; defaults to 8000 |
+
+Per-user CoinDCX/Telegram keys are **not** env vars — they live encrypted in the
+`user_credentials` table, entered via the dashboard.
 
 ---
 
 ## API Endpoints
 
-All routes require `Authorization: Bearer <clerk_jwt>`.
+All `/api/*` routes require `Authorization: Bearer <clerk_jwt>`. `/health` is public.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/status` | Bot running state, mode, last scan time |
-| GET | `/api/portfolio` | Summary + stats |
-| GET | `/api/portfolio/history` | P&L history for chart |
+| GET | `/health` | 200 if scanner thread alive (Fly health check) |
+| GET | `/api/status` | Bot running state, mode, last scan, daily P&L |
+| GET | `/api/portfolio` (+`/history`) | Summary + stats; P&L history |
 | GET | `/api/positions` | Open positions with live prices |
-| GET | `/api/trades?limit=50` | Trade history |
-| GET | `/api/signals` | Last scan results |
-| WS  | `/ws?token=<jwt>` | Real-time events |
+| GET | `/api/trades?limit=` | Trade history |
+| GET | `/api/signals` | Last scan results (incl. regime + bucket) |
+| POST | `/api/ws/token` | Mint a single-use WS handshake ticket |
+| POST | `/api/bot/start` · `/stop` · PUT `/mode` | Lifecycle (live mode gated) |
+| PUT/DELETE/POST | `/api/credentials/*` | CoinDCX/Telegram CRUD + test (rate-limited) |
+| GET/POST | `/api/allocation` · `/pause` · `/resume` · `/confirm-shift` | Capital allocation |
+| WS | `/ws?ticket=<ticket>` | Real-time events (ticket, **not** JWT, in the URL) |
 
 ## WebSocket Events
 
 ```json
 {"type": "snapshot",        "data": {...}}
 {"type": "scan_complete",   "data": {"signals": [...], "open_positions": 1}}
-{"type": "trade_buy",       "data": {"symbol": "BTC/INR", "price": ..., "score": ...}}
-{"type": "trade_sell",      "data": {"symbol": "BTC/INR", "pnl": ..., "reason": ...}}
+{"type": "price_update",    "data": {"prices": {...}, "portfolio_value": ..., "daily_pnl": ...}}
+{"type": "trade_buy",       "data": {"symbol": "BTC/USDT", "price": ..., "amount_usdt": ...}}
+{"type": "trade_sell",      "data": {"symbol": "BTC/USDT", "pnl": ..., "reason": ...}}
+{"type": "shift_suggestion","data": {"regime": "bull", "suggested_day_pct": 25, ...}}
+{"type": "bucket_drawdown", "data": {"bucket": "day", "state": "paused"}}
 {"type": "daily_limit_hit", "data": {"timestamp": ...}}
 ```
 
@@ -108,27 +145,48 @@ All routes require `Authorization: Bearer <clerk_jwt>`.
 ## Key Design Rules
 
 - **All params in `config/settings.py`** — never hardcode thresholds.
-- **`BotState`** is the only bridge between the bot thread and the API thread. Use `bot_state.lock` when reading `paper_trader` from the API handlers.
-- **Sentiment is graceful** — missing keys return neutral score (50/100); bot continues.
-- **Paper trader is always the source of truth** for positions, even in live mode.
-- **JWKS is cached 1 hour** in `src/api/auth.py` — do not bypass the cache.
+- **USDT only** (`QUOTE_CURRENCY`). Money fields are `*_usdt`; DB money columns are
+  `Numeric` (never `Float`). Candle pairs use the `B-` prefix for USDT (`I-` for INR).
+- **Paper trader is the source of truth for positions, even in live mode** — live
+  fills are reconciled (actual price/qty) and mirrored into the paper book.
+- **Orders are idempotent**: a row is written `pending` before the exchange call
+  (UUID client-order-id); an ambiguous timeout is marked `unconfirmed`, never retried.
+- **Capital buckets**: every entry is tagged `day` or `long`; `AllocationManager`
+  isolates each bucket's budget, compounds its realized P&L, and runs a per-bucket
+  drawdown circuit-breaker (reduce → halt → pause). The bot never moves funds
+  between buckets without a user-confirmed shift.
+- **Sizing** is fractional-Kelly + ATR risk, capped by the bucket budget and
+  `max_position_usdt`. Stops are ATR-based (bucket-scaled), not fixed-pct.
+- **State persists**: open positions + daily P&L are restored on restart so the
+  loss-limit can't be reset by bouncing the process.
+- **`BotState`/`UserBotState`** is the only bridge between the bot thread and the
+  API thread. Hold `state.lock` for all `paper_trader` reads/writes.
+- **Live mode is hard-gated** by `LIVE_TRADING_ENABLED` (+ per-request confirm).
+- **JWKS is cached 30 min** in `src/api/auth.py`; a kid-miss forces one refresh.
 
 ---
 
-## Railway Deployment
+## Deployment
 
-1. Push repo to GitHub
-2. Railway → New Project → Deploy from GitHub
-3. Service Settings → **Root Directory = `backend`**
-4. Add all env vars from `.env.example` in the Variables tab
-5. Railway auto-detects `railway.toml` and builds the Dockerfile
+**Primary: Fly.io** (Mumbai). Walkthrough: [../deploy/FLY-SETUP-GUIDE.md](../deploy/FLY-SETUP-GUIDE.md).
+Validation before live: [../deploy/VALIDATION-RUNBOOK.md](../deploy/VALIDATION-RUNBOOK.md).
 
-**SQLite persistence**: add a Railway Volume mounted at `/app/data` before going live.
+- Config is [`fly.toml`](fly.toml): builds this `Dockerfile`, region `bom`, always-on,
+  `shared-cpu-1x` / 512 MB, `/health` check.
+- Secrets set with `fly secrets set …`: `DATABASE_URL`, `MASTER_ENCRYPTION_KEY`,
+  `CLERK_JWKS_URL`, `API_CORS_ORIGINS`, `LIVE_TRADING_ENABLED`, `REDDIT_*`.
+- **Single instance only** — the in-memory scanner cache / per-user threads can't be
+  horizontally scaled. Persist state to the DB rather than going multi-worker.
+- Run migrations from your machine: `alembic upgrade head` (chain `0001 → 0004`).
+
+**Alternative (self-hosted VM)**: OCI/EC2 + Cloudflare Tunnel — see [../deploy/README.md](../deploy/README.md).
 
 ---
 
 ## Warnings
 
-- Never commit `.env`
-- Never set `MODE=live` without 1–2 weeks of paper trading validation
-- CoinDCX KYC takes 1–3 business days in India
+- Never commit `.env`.
+- **Never set `LIVE_TRADING_ENABLED=true` until the backtest passes and you've
+  paper-traded 1–2 weeks** (the runbook is the checklist).
+- Use **trade-only (no-withdrawal)** CoinDCX keys, IP-allowlisted to the Fly egress IP.
+- CoinDCX KYC takes 1–3 business days in India.

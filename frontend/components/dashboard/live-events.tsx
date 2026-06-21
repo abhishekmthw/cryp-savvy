@@ -62,7 +62,7 @@ function EventRow({ event }: { event: WsEvent }) {
 
   let detail = "";
   if (event.type === "trade_buy") {
-    detail = `${event.data.symbol} @ ₹${Number(event.data.price).toLocaleString("en-IN")}`;
+    detail = `${event.data.symbol} @ $${Number(event.data.price).toLocaleString("en-IN")}`;
   } else if (event.type === "trade_sell") {
     detail = `${event.data.symbol} · ${
       Number(event.data.pnl_pct) >= 0 ? "+" : ""

@@ -1,7 +1,9 @@
 /**
  * WebSocket client with automatic reconnection.
- * Tokens are passed as a query parameter because browsers cannot set
- * custom headers on WebSocket upgrades.
+ *
+ * Auth uses a single-use handshake *ticket* (minted via POST /api/ws/token),
+ * NOT the Clerk JWT — the JWT must never appear in a URL. A fresh ticket is
+ * fetched before every (re)connect because tickets are consumed on use.
  */
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
@@ -11,7 +13,11 @@ export type WsEventType =
   | "scan_complete"
   | "trade_buy"
   | "trade_sell"
-  | "daily_limit_hit";
+  | "daily_limit_hit"
+  | "price_update"
+  | "shift_suggestion"
+  | "bucket_drawdown"
+  | "ping";
 
 export interface WsEvent {
   type: WsEventType;
@@ -19,18 +25,24 @@ export interface WsEvent {
 }
 
 export function createWebSocket(
-  token: string,
+  getTicket: () => Promise<string | null>,
   onMessage: (event: WsEvent) => void,
   onStatusChange?: (connected: boolean) => void
 ): () => void {
   let ws: WebSocket | null = null;
   let stopped = false;
   let retryDelay = 2000;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function connect() {
+  async function connect() {
     if (stopped) return;
+    const ticket = await getTicket();
+    if (stopped || !ticket) {
+      scheduleReconnect();
+      return;
+    }
 
-    ws = new WebSocket(`${WS_URL}/ws?token=${encodeURIComponent(token)}`);
+    ws = new WebSocket(`${WS_URL}/ws?ticket=${encodeURIComponent(ticket)}`);
 
     ws.onopen = () => {
       retryDelay = 2000;
@@ -40,6 +52,7 @@ export function createWebSocket(
     ws.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data) as WsEvent;
+        if (event.type === "ping") return; // heartbeat — ignore
         onMessage(event);
       } catch {
         // Ignore malformed messages
@@ -48,11 +61,7 @@ export function createWebSocket(
 
     ws.onclose = () => {
       onStatusChange?.(false);
-      if (!stopped) {
-        // Exponential back-off, cap at 30 seconds
-        setTimeout(connect, retryDelay);
-        retryDelay = Math.min(retryDelay * 1.5, 30_000);
-      }
+      scheduleReconnect();
     };
 
     ws.onerror = () => {
@@ -60,11 +69,43 @@ export function createWebSocket(
     };
   }
 
+  function scheduleReconnect() {
+    if (stopped || retryTimer) return;
+    const wait = retryDelay;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      connect();
+    }, wait);
+    // Exponential back-off with jitter, capped at 15s, so a server restart
+    // doesn't cause a synchronized thundering herd of reconnects.
+    retryDelay = Math.min(retryDelay * 1.5 + Math.random() * 1000, 15_000);
+  }
+
+  // Reconnect promptly when the tab regains focus.
+  const onVisible = () => {
+    if (!stopped && document.visibilityState === "visible" &&
+        (!ws || ws.readyState === WebSocket.CLOSED)) {
+      retryDelay = 2000;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      connect();
+    }
+  };
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onVisible);
+  }
+
   connect();
 
   // Return a cleanup function
   return () => {
     stopped = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", onVisible);
+    }
     ws?.close();
   };
 }

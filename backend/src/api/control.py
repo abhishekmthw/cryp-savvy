@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+from config import settings
 from src.api.deps import get_current_user
 from src.db.models import User
 
@@ -55,10 +56,19 @@ async def set_mode(body: ModeIn, request: Request,
                    user: Annotated[User, Depends(get_current_user)]):
     if body.mode not in ("paper", "live"):
         raise HTTPException(400, detail="mode must be 'paper' or 'live'")
-    if body.mode == "live" and body.confirm != "I_ACCEPT_LIVE_RISK":
-        raise HTTPException(
-            400,
-            detail="Switching to live trading requires confirm='I_ACCEPT_LIVE_RISK'",
-        )
+    if body.mode == "live":
+        # Hard validation gate — operator must enable live trading explicitly
+        # (after the backtest + paper-trade validation in the runbook).
+        if not settings.LIVE_TRADING_ENABLED:
+            raise HTTPException(
+                403,
+                detail="Live trading is disabled on this deployment until "
+                       "validation is complete (set LIVE_TRADING_ENABLED=true).",
+            )
+        if body.confirm != "I_ACCEPT_LIVE_RISK":
+            raise HTTPException(
+                400,
+                detail="Switching to live trading requires confirm='I_ACCEPT_LIVE_RISK'",
+            )
     _orch(request).set_mode(user.clerk_user_id, body.mode)
     return {"ok": True, "mode": body.mode}

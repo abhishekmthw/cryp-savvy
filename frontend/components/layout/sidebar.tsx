@@ -64,9 +64,9 @@ export function Sidebar() {
       </nav>
 
       <div className="mt-auto rounded-xl border border-border/60 bg-gradient-to-br from-primary/10 via-card to-card p-4">
-        <p className="text-xs font-semibold text-foreground">Indian markets only</p>
+        <p className="text-xs font-semibold text-foreground">USDT trading</p>
         <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-          Trades INR pairs on CoinDCX. Paper mode is default — switch to live anytime in
+          Trades USDT pairs on CoinDCX. Paper mode is default — switch to live anytime in
           Dashboard.
         </p>
       </div>

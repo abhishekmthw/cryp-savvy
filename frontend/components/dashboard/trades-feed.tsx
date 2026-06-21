@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { formatINR, formatPct, formatTs, cn } from "@/lib/utils";
+import { formatUSD, formatPct, formatTs, cn } from "@/lib/utils";
 
 export function TradesFeed() {
   const { data, isLoading } = useTrades(10);
@@ -82,7 +82,7 @@ export function TradesFeed() {
                           profit ? "text-success" : "text-destructive"
                         )}
                       >
-                        {formatINR(t.pnl)}
+                        {formatUSD(t.pnl)}
                       </p>
                       <p
                         className={cn(
