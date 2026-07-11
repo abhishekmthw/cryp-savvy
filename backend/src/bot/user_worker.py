@@ -197,7 +197,12 @@ class UserBot:
                 amount_usdt = self._risk.position_size_usdt(price=price, atr=atr, bucket=bucket)
                 if amount_usdt < settings.MIN_TRADE_USDT:
                     continue
-                order = self._order_mgr.buy(sym, amount_usdt, price, atr=atr, bucket=bucket)
+                order = self._order_mgr.buy(
+                    sym, amount_usdt, price, atr=atr, bucket=bucket,
+                    strategy=analysis.get("strategy", "none"),
+                    regime=analysis.get("regime"),
+                    score=analysis.get("composite_score"),
+                )
             if order:
                 self._persist_position(sym)
                 self._alerter.alert_buy(sym, price, amount_usdt,

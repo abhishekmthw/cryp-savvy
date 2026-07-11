@@ -46,6 +46,14 @@ def analyse_symbol(symbol: str, market_data: MarketData) -> dict:
     if df is None or df.empty:
         return result
 
+    # Decide on the last CLOSED candle: the live feed's most recent 1h bar is
+    # still forming, and acting on it makes the bot chase intrabar spikes that
+    # reverse by the close (the main live-vs-backtest divergence). The backtest
+    # only ever sees closed bars, so dropping the forming bar keeps live
+    # consistent with what was validated. Fills still happen at the live price.
+    if settings.SIGNAL_ON_CLOSED_CANDLE and len(df) > 2:
+        df = df.iloc[:-1]
+
     tech = compute_indicators(df)
     if tech is None:
         return result

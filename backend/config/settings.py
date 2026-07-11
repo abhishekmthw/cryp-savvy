@@ -76,6 +76,13 @@ MIN_TRADE_USDT  = 5.0
 # ── Technical Analysis ────────────────────────────────────────────────────────
 TIMEFRAME        = "1h"
 CANDLE_LIMIT     = 100
+# Evaluate entry/exit SIGNALS on the last CLOSED candle, not the still-forming
+# one. The live feed's most recent 1h bar is incomplete, so deciding on it makes
+# the bot chase intrabar spikes — Donchian "breakouts" that fail by the close —
+# and buy short-term tops that revert into the stop. This was the main reason
+# live diverged from (and badly underperformed) the closed-bar backtest. SL/TP/
+# trailing still react to live prices via the fast loop, so exits stay prompt.
+SIGNAL_ON_CLOSED_CANDLE = True
 EMA_FAST         = 9
 EMA_SLOW         = 21
 RSI_PERIOD       = 14

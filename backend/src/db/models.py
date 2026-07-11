@@ -117,7 +117,14 @@ class Trade(Base):
     proceeds:    Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     pnl:         Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     pnl_pct:     Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
-    reason:      Mapped[str | None] = mapped_column(String, nullable=True)
+    reason:      Mapped[str | None] = mapped_column(String, nullable=True)  # exit: stop_loss|take_profit|sell_signal
+    # Entry attribution (added 0005) — nullable because trades booked before the
+    # instrumentation shipped won't have it. Lets diagnostics group by bucket/
+    # sub-strategy/regime and correlate entry conviction with realized P&L.
+    bucket:      Mapped[str | None] = mapped_column(String, nullable=True)   # 'day'|'long'
+    strategy:    Mapped[str | None] = mapped_column(String, nullable=True)   # donchian_breakout|trend_following|rsi_mean_reversion|...
+    regime:      Mapped[str | None] = mapped_column(String, nullable=True)   # bull|bear|sideways
+    entry_score: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)  # composite score at entry
     duration_s:  Mapped[float | None] = mapped_column(Float, nullable=True)  # time, not money
     ts:          Mapped[float] = mapped_column(Float, nullable=False)        # epoch seconds
 
@@ -145,6 +152,10 @@ class Position(Base):
     order_id:      Mapped[str | None] = mapped_column(String, nullable=True)
     status:        Mapped[str] = mapped_column(String, default="open", nullable=False)  # 'pending'|'open'|'closing'
     bucket:        Mapped[str] = mapped_column(String, default="day", nullable=False)  # 'day'|'long'
+    # Entry attribution (added 0005) — carried to the trades row on close.
+    strategy:      Mapped[str | None] = mapped_column(String, nullable=True)
+    regime:        Mapped[str | None] = mapped_column(String, nullable=True)
+    entry_score:   Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="positions")
 

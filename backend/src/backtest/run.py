@@ -25,7 +25,11 @@ MIN_OOS_SHARPE = 0.5
 MAX_OOS_DRAWDOWN = 0.35   # aligns with the aggressive pause breaker
 
 
-def main(symbols: list[str], timeframe: str = "4h", limit: int = 1000) -> int:
+def main(symbols: list[str], timeframe: str = settings.TIMEFRAME, limit: int = 1000) -> int:
+    # NOTE: use the SAME timeframe the live bot trades on (settings.TIMEFRAME,
+    # default '1h') so the gate is representative. CoinDCX's public candles API
+    # only accepts [1m, 15m, 1h, 1d] — the previous hardcoded '4h' 422'd on every
+    # fetch, which surfaced as a silent NO-GO (the gate never actually ran).
     client = CoinDCXClient()
     overall_go = True
     for symbol in symbols:

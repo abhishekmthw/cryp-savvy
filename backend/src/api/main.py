@@ -196,6 +196,16 @@ def create_app(scanner: MarketDataScanner, orchestrator: BotOrchestrator) -> Fas
             history = repo.pnl_history_for_user(db, user.clerk_user_id, initial)
         return {"history": history}
 
+    @app.get("/api/portfolio/diagnostics")
+    async def get_portfolio_diagnostics(user: Annotated[User, Depends(get_current_user)]):
+        """Loss-attribution breakdown of closed trades — powers the /diagnostics
+        dashboard. Read-only aggregation over the trades table."""
+        state = orchestrator.get_state(user.clerk_user_id)
+        initial = state.paper_trader.initial_capital_usdt if state.paper_trader else 10_000.0
+        with session_scope() as db:
+            diagnostics = repo.trade_diagnostics(db, user.clerk_user_id, initial)
+        return diagnostics
+
     @app.get("/api/positions")
     async def get_positions(user: Annotated[User, Depends(get_current_user)]):
         state = orchestrator.get_state(user.clerk_user_id)

@@ -55,6 +55,19 @@ export function usePortfolioHistory() {
   });
 }
 
+export function useDiagnostics() {
+  const getToken = useToken();
+  return useQuery({
+    queryKey: ["diagnostics"],
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.diagnostics(token);
+    },
+    refetchInterval: 60_000, // analytics don't need to update as often
+  });
+}
+
 export function usePositions() {
   const getToken = useToken();
   return useQuery({

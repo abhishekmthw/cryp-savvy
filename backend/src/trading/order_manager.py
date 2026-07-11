@@ -75,19 +75,25 @@ class OrderManager:
     # ── Buy ───────────────────────────────────────────────────────────────────
 
     def buy(self, symbol: str, amount_usdt: float, current_price: float,
-            atr: Optional[float] = None, bucket: str = "day") -> Optional[dict]:
+            atr: Optional[float] = None, bucket: str = "day",
+            strategy: str = "none", regime: Optional[str] = None,
+            score: Optional[float] = None) -> Optional[dict]:
         coid = uuid.uuid4().hex
         self._log_create(coid, symbol, "buy", requested_amount=amount_usdt,
-                         requested_price=current_price)
+                         requested_price=current_price, bucket=bucket)
 
         if self.is_live:
-            return self._buy_live(coid, symbol, amount_usdt, current_price, atr, bucket)
-        return self._buy_paper(coid, symbol, amount_usdt, current_price, atr, bucket)
+            return self._buy_live(coid, symbol, amount_usdt, current_price, atr,
+                                  bucket, strategy, regime, score)
+        return self._buy_paper(coid, symbol, amount_usdt, current_price, atr,
+                               bucket, strategy, regime, score)
 
     def _buy_paper(self, coid, symbol, amount_usdt, current_price,
-                   atr=None, bucket="day") -> Optional[dict]:
+                   atr=None, bucket="day", strategy="none", regime=None,
+                   score=None) -> Optional[dict]:
         pos = self._paper.place_market_buy(symbol, amount_usdt, current_price,
-                                           atr=atr, bucket=bucket)
+                                           atr=atr, bucket=bucket, strategy=strategy,
+                                           regime=regime, entry_score=score)
         if pos is None:
             self._log_update(coid, status="failed", error="paper rejected")
             return None
@@ -99,7 +105,8 @@ class OrderManager:
         }
 
     def _buy_live(self, coid, symbol, amount_usdt, current_price,
-                  atr=None, bucket="day") -> Optional[dict]:
+                  atr=None, bucket="day", strategy="none", regime=None,
+                  score=None) -> Optional[dict]:
         try:
             fill = self._live.place_market_buy(symbol, amount_usdt, client_order_id=coid)
         except _TIMEOUT_EXC:
@@ -121,6 +128,7 @@ class OrderManager:
         pos = self._paper.place_market_buy(
             symbol, amount_usdt, current_price,
             fill_price=fill_price, fill_qty=fill_qty, atr=atr, bucket=bucket,
+            strategy=strategy, regime=regime, entry_score=score,
         )
         status = "filled" if fill.get("confirmed") else "unconfirmed"
         self._log_update(coid, status=status, fill_price=fill_price, fill_qty=fill_qty,

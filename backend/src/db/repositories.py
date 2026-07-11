@@ -10,6 +10,7 @@ control the transaction boundary via ``session_scope()``.
 from __future__ import annotations
 
 import time
+from statistics import mean
 from typing import Optional
 
 from sqlalchemy import case, desc, func, select
@@ -20,6 +21,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from config import settings
+from src.backtest import metrics
 from src.db.models import (
     Allocation, BucketState, Order, Position, Trade, User, UserBotConfig,
     UserCredential,
@@ -143,6 +145,10 @@ def record_trade(db: Session, *, user_id: str, trade: dict) -> None:
         pnl=trade.get("pnl"),
         pnl_pct=trade.get("pnl_pct"),
         reason=trade.get("reason"),
+        bucket=trade.get("bucket"),
+        strategy=trade.get("strategy"),
+        regime=trade.get("regime"),
+        entry_score=trade.get("entry_score"),
         duration_s=trade.get("duration_s"),
         ts=time.time(),
     ))
@@ -165,6 +171,11 @@ def trades_for_user(db: Session, user_id: str, limit: int = 50, offset: int = 0)
         "pnl":         _f(t.pnl),
         "pnl_pct":     _f(t.pnl_pct),
         "reason":      t.reason,
+        "bucket":      t.bucket,
+        "strategy":    t.strategy,
+        "regime":      t.regime,
+        "entry_score": _f(t.entry_score),
+        "duration_s":  _f(t.duration_s),
         "ts":          t.ts,
     } for t in rows]
 
@@ -209,6 +220,132 @@ def count_trades(db: Session, user_id: str) -> int:
     return int(db.execute(
         select(func.count(Trade.id)).where(Trade.user_id == user_id)
     ).scalar() or 0)
+
+
+def trade_diagnostics(db: Session, user_id: str, initial_capital: float = 0.0) -> dict:
+    """
+    Loss-attribution breakdown of a user's closed trades — the data behind the
+    diagnostics dashboard. Pure aggregation over the ``trades`` table: overall
+    "edge" metrics (profit factor, expectancy, payoff & breakeven win rate, max
+    drawdown) plus per-reason / per-symbol / per-bucket / per-strategy /
+    per-regime cuts and a fee-drag estimate. Reuses the backtester's metric
+    helpers so paper stats and backtest stats are computed identically.
+
+    Trades booked before the 0005 instrumentation have NULL bucket/strategy/
+    regime and are grouped as ``"unknown"`` there (see ``coverage``); the
+    reason/symbol/duration/edge/fee cuts work on all historical trades.
+    """
+    rows = list(db.execute(
+        select(Trade).where(Trade.user_id == user_id).order_by(Trade.ts.asc())
+    ).scalars())
+    if not rows:
+        return {"total_trades": 0}
+
+    def _f(v) -> float:
+        return float(v) if v is not None else 0.0
+
+    trades = [{
+        "pnl":         _f(t.pnl),
+        "pnl_pct":     _f(t.pnl_pct),
+        "reason":      t.reason or "unknown",
+        "symbol":      t.symbol or "unknown",
+        "bucket":      t.bucket or "unknown",
+        "strategy":    t.strategy or "unknown",
+        "regime":      t.regime or "unknown",
+        "amount_usdt": _f(t.amount_usdt),
+        "duration_s":  _f(t.duration_s),
+    } for t in rows]
+
+    total  = len(trades)
+    pnls   = [t["pnl"] for t in trades]
+    wins   = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+
+    avg_win  = mean(wins) if wins else 0.0
+    avg_loss = mean(losses) if losses else 0.0            # negative
+    payoff   = (avg_win / abs(avg_loss)) if avg_loss else 0.0
+    breakeven_wr = (1.0 / (1.0 + payoff) * 100) if payoff > 0 else 0.0
+
+    # Equity curve (initial + running P&L) → max drawdown, via the backtester.
+    equity, running = [float(initial_capital)], float(initial_capital)
+    for p in pnls:
+        running += p
+        equity.append(running)
+
+    edge = {
+        "win_rate":           round(len(wins) / total * 100, 2),
+        "breakeven_win_rate": round(breakeven_wr, 2),
+        "profit_factor":      round(metrics.profit_factor(trades), 3),
+        "expectancy_usdt":    round(metrics.expectancy(trades), 4),
+        "expectancy_pct":     round(mean([t["pnl_pct"] for t in trades]), 4),
+        "avg_win_usdt":       round(avg_win, 2),
+        "avg_loss_usdt":      round(avg_loss, 2),
+        "payoff_ratio":       round(payoff, 3),
+        "largest_win_usdt":   round(max(wins), 2) if wins else 0.0,
+        "largest_loss_usdt":  round(min(losses), 2) if losses else 0.0,
+        "gross_profit_usdt":  round(sum(wins), 2),
+        "gross_loss_usdt":    round(sum(losses), 2),
+        "total_pnl_usdt":     round(sum(pnls), 2),
+        "max_drawdown_pct":   round(metrics.max_drawdown(equity) * 100, 2),
+    }
+
+    # Fee/slippage drag: ~round-trip cost on the traded notional (both sides).
+    rt_rate = (settings.FEE_PCT + settings.SLIPPAGE_PCT) * 2
+    est_cost = sum(t["amount_usdt"] for t in trades) * rt_rate
+    gross_loss_abs = abs(edge["gross_loss_usdt"]) or 1.0
+    fees = {
+        "round_trip_pct":      round(rt_rate * 100, 3),
+        "est_total_cost_usdt": round(est_cost, 2),
+        "est_cost_per_trade":  round(est_cost / total, 4),
+        "pct_of_gross_loss":   round(est_cost / gross_loss_abs * 100, 1),
+    }
+
+    # Hold-time: are losers held longer than winners (letting losses run)?
+    win_durs  = [t["duration_s"] for t, p in zip(trades, pnls) if p > 0]
+    loss_durs = [t["duration_s"] for t, p in zip(trades, pnls) if p < 0]
+    duration = {
+        "avg_hours":      round(mean([t["duration_s"] for t in trades]) / 3600, 2),
+        "avg_win_hours":  round(mean(win_durs) / 3600, 2) if win_durs else 0.0,
+        "avg_loss_hours": round(mean(loss_durs) / 3600, 2) if loss_durs else 0.0,
+    }
+
+    def _breakdown(key: str) -> list[dict]:
+        groups: dict[str, list[dict]] = {}
+        for t in trades:
+            groups.setdefault(t[key], []).append(t)
+        out = []
+        for name, ts in groups.items():
+            g_pnls = [x["pnl"] for x in ts]
+            g_wins = [p for p in g_pnls if p > 0]
+            out.append({
+                "key":         name,
+                "count":       len(ts),
+                "wins":        len(g_wins),
+                "win_rate":    round(len(g_wins) / len(ts) * 100, 1),
+                "total_pnl":   round(sum(g_pnls), 2),
+                "avg_pnl":     round(mean(g_pnls), 2),
+                "avg_pnl_pct": round(mean([x["pnl_pct"] for x in ts]), 2),
+            })
+        # Biggest bleeders (most negative total P&L) first.
+        return sorted(out, key=lambda r: r["total_pnl"])
+
+    attributed = sum(1 for t in trades if t["strategy"] != "unknown")
+
+    return {
+        "total_trades": total,
+        "edge":         edge,
+        "fees":         fees,
+        "duration":     duration,
+        "by_reason":    _breakdown("reason"),
+        "by_symbol":    _breakdown("symbol"),
+        "by_bucket":    _breakdown("bucket"),
+        "by_strategy":  _breakdown("strategy"),
+        "by_regime":    _breakdown("regime"),
+        "coverage": {
+            "attributed_trades":   attributed,
+            "unattributed_trades": total - attributed,
+        },
+    }
 
 
 def pnl_history_for_user(db: Session, user_id: str, initial_capital: float) -> list[dict]:
@@ -257,13 +394,14 @@ def positions_for_user(db: Session, user_id: str) -> list[Position]:
 
 def create_order(db: Session, *, user_id: str, client_order_id: str, symbol: str,
                  side: str, mode: str, quote_currency: str = "USDT",
+                 bucket: str = "day",
                  requested_amount: float | None = None,
                  requested_qty: float | None = None,
                  requested_price: float | None = None,
                  reason: str | None = None) -> None:
     db.add(Order(
         id=client_order_id, user_id=user_id, symbol=symbol, side=side, mode=mode,
-        status="pending", quote_currency=quote_currency,
+        status="pending", quote_currency=quote_currency, bucket=bucket,
         requested_amount=requested_amount, requested_qty=requested_qty,
         requested_price=requested_price, reason=reason,
     ))

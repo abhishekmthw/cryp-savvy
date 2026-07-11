@@ -60,6 +60,10 @@ class Portfolio:
                     "trailing_high": float(p.trailing_high),
                     "order_id":      p.order_id,
                     "bucket":        getattr(p, "bucket", "day"),
+                    "strategy":      getattr(p, "strategy", "none"),
+                    "regime":        getattr(p, "regime", None),
+                    "entry_score":   (float(p.entry_score)
+                                      if getattr(p, "entry_score", None) is not None else None),
                 }
                 for p in repo.positions_for_user(db, self._user_id)
             ]

@@ -39,13 +39,22 @@ def _warmup(df: pd.DataFrame) -> int:
 
 
 def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
-                 periods_per_year: float = 365 * 24) -> BacktestResult:
+                 periods_per_year: float = 365 * 24,
+                 use_trailing: bool = True) -> BacktestResult:
     """
     Replay ``df`` (oldest-first OHLCV) bar by bar. Enters long on a gated BUY,
     exits on SL/TP (checked intrabar against high/low) or a SELL signal.
+
+    ``use_trailing`` mirrors the live PaperTrader's trailing stop (arms at
+    ``TRAILING_STOP_TRIGGER`` gain, trails ``TRAILING_STOP_OFFSET`` below the
+    running high). It defaults to True so the gate is an HONEST proxy for live —
+    without it the backtest rides winners to the fixed take-profit that live
+    never reaches, badly overstating the edge.
     """
     fee = settings.FEE_PCT
     slip = settings.SLIPPAGE_PCT
+    trail_trigger = settings.TRAILING_STOP_TRIGGER
+    trail_offset = settings.TRAILING_STOP_OFFSET
     warmup = _warmup(df)
     if len(df) <= warmup + 2:
         return BacktestResult(equity=[initial_capital],
@@ -63,17 +72,17 @@ def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
 
         # ── manage an open position (intrabar SL/TP, then signal exit) ──────────
         if pos is not None:
-            exit_price = None
+            exit_price, reason = None, None
             if float(bar["low"]) <= pos["stop"]:
-                exit_price = pos["stop"]
+                exit_price, reason = pos["stop"], "stop_loss"
             elif float(bar["high"]) >= pos["take"]:
-                exit_price = pos["take"]
+                exit_price, reason = pos["take"], "take_profit"
             if exit_price is None:
                 tech = compute_indicators(window)
                 if tech is not None:
                     strat = strategies.evaluate(window, tech)
                     if strat["action"] == strategies.SELL:
-                        exit_price = price
+                        exit_price, reason = price, "sell_signal"
             if exit_price is not None:
                 fill = exit_price * (1 - slip)
                 proceeds = pos["qty"] * fill * (1 - fee)
@@ -82,9 +91,18 @@ def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
                 trades.append({
                     "entry": pos["entry"], "exit": fill, "qty": pos["qty"],
                     "pnl": pnl, "pnl_pct": pnl / pos["cost"] * 100 if pos["cost"] else 0.0,
-                    "bucket": pos["bucket"],
+                    "bucket": pos["bucket"], "reason": reason,
                 })
                 pos = None
+            elif use_trailing:
+                # Mirror PaperTrader.update_trailing_stop: once the running high
+                # is far enough above entry, ratchet the stop up beneath it. Uses
+                # this bar's high, so the raised stop applies from the next bar
+                # (avoids same-bar SL/trail circularity).
+                hi = max(pos["trail_high"], float(bar["high"]))
+                if (hi - pos["entry"]) / pos["entry"] >= trail_trigger:
+                    pos["stop"] = max(pos["stop"], hi * (1 - trail_offset))
+                pos["trail_high"] = hi
 
         # ── consider a new entry when flat ──────────────────────────────────────
         if pos is None:
@@ -103,7 +121,8 @@ def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
                         stop, take = strategies.atr_stops(entry, atr, bucket)
                         cash -= cost
                         pos = {"qty": qty, "entry": entry, "cost": cost,
-                               "stop": stop, "take": take, "bucket": bucket}
+                               "stop": stop, "take": take, "bucket": bucket,
+                               "trail_high": entry}
 
         # mark-to-market equity
         held = pos["qty"] * price if pos else 0.0

@@ -73,6 +73,59 @@ export interface ChartPoint {
   value: number;
 }
 
+export interface DiagnosticsEdge {
+  win_rate: number;
+  breakeven_win_rate: number;
+  profit_factor: number;
+  expectancy_usdt: number;
+  expectancy_pct: number;
+  avg_win_usdt: number;
+  avg_loss_usdt: number;
+  payoff_ratio: number;
+  largest_win_usdt: number;
+  largest_loss_usdt: number;
+  gross_profit_usdt: number;
+  gross_loss_usdt: number;
+  total_pnl_usdt: number;
+  max_drawdown_pct: number;
+}
+
+export interface DiagnosticsFees {
+  round_trip_pct: number;
+  est_total_cost_usdt: number;
+  est_cost_per_trade: number;
+  pct_of_gross_loss: number;
+}
+
+export interface DiagnosticsDuration {
+  avg_hours: number;
+  avg_win_hours: number;
+  avg_loss_hours: number;
+}
+
+export interface DiagnosticsGroup {
+  key: string;
+  count: number;
+  wins: number;
+  win_rate: number;
+  total_pnl: number;
+  avg_pnl: number;
+  avg_pnl_pct: number;
+}
+
+export interface Diagnostics {
+  total_trades: number;
+  edge?: DiagnosticsEdge;
+  fees?: DiagnosticsFees;
+  duration?: DiagnosticsDuration;
+  by_reason?: DiagnosticsGroup[];
+  by_symbol?: DiagnosticsGroup[];
+  by_bucket?: DiagnosticsGroup[];
+  by_strategy?: DiagnosticsGroup[];
+  by_regime?: DiagnosticsGroup[];
+  coverage?: { attributed_trades: number; unattributed_trades: number };
+}
+
 export interface ProviderStatus {
   present: boolean;
   valid: boolean;
@@ -156,6 +209,9 @@ export const api = {
 
   portfolioHistory: (token: string) =>
     apiFetch<{ history: ChartPoint[] }>("/api/portfolio/history", token),
+
+  diagnostics: (token: string) =>
+    apiFetch<Diagnostics>("/api/portfolio/diagnostics", token),
 
   positions: (token: string) =>
     apiFetch<{ positions: Position[] }>("/api/positions", token),

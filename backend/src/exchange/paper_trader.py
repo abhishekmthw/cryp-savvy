@@ -39,6 +39,11 @@ class PaperPosition:
     take_profit:   float
     trailing_high: float = 0.0
     bucket:        str = "day"
+    # Entry attribution — recorded at buy time so a closed trade can be traced
+    # back to which sub-strategy/regime opened it (diagnostics).
+    strategy:      str = "none"
+    regime:        Optional[str] = None
+    entry_score:   Optional[float] = None
     order_id:      str = field(default_factory=lambda: str(uuid.uuid4())[:8])
 
 
@@ -78,6 +83,9 @@ class PaperTrader:
             stop_loss=p["stop_loss"], take_profit=p["take_profit"],
             trailing_high=p.get("trailing_high") or p["entry_price"],
             bucket=p.get("bucket", "day"),
+            strategy=p.get("strategy", "none"),
+            regime=p.get("regime"),
+            entry_score=p.get("entry_score"),
         )
         if p.get("order_id"):
             pos.order_id = p["order_id"]
@@ -92,7 +100,8 @@ class PaperTrader:
             "entry_time": pos.entry_time, "amount_usdt": pos.amount_usdt,
             "stop_loss": pos.stop_loss, "take_profit": pos.take_profit,
             "trailing_high": pos.trailing_high, "order_id": pos.order_id,
-            "bucket": pos.bucket, "status": "open",
+            "bucket": pos.bucket, "strategy": pos.strategy, "regime": pos.regime,
+            "entry_score": pos.entry_score, "status": "open",
         }
 
     @property
@@ -115,7 +124,10 @@ class PaperTrader:
                          fill_price: Optional[float] = None,
                          fill_qty: Optional[float] = None,
                          atr: Optional[float] = None,
-                         bucket: str = "day") -> Optional[PaperPosition]:
+                         bucket: str = "day",
+                         strategy: str = "none",
+                         regime: Optional[str] = None,
+                         entry_score: Optional[float] = None) -> Optional[PaperPosition]:
         if self.is_daily_limit_hit:
             return None
         if self.open_position_count >= self._cfg.max_open_positions:
@@ -150,6 +162,9 @@ class PaperTrader:
             take_profit=take_profit,
             trailing_high=entry_price,
             bucket=bucket,
+            strategy=strategy,
+            regime=regime,
+            entry_score=entry_score,
         )
 
         self.balance_usdt -= actual_spend
@@ -213,6 +228,9 @@ class PaperTrader:
             "pnl_pct":     pnl_pct,
             "reason":      reason,
             "bucket":      position.bucket,
+            "strategy":    position.strategy,
+            "regime":      position.regime,
+            "entry_score": position.entry_score,
             "duration_s":  time.time() - position.entry_time,
         }
         self.closed_trades.append(record)
