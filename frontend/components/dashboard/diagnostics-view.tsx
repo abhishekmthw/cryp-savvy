@@ -2,6 +2,7 @@
 
 import { useDiagnostics } from "@/hooks/use-api";
 import type { DiagnosticsGroup } from "@/lib/api";
+import { DiagnosticsExport } from "@/components/dashboard/diagnostics-export";
 import {
   Card,
   CardContent,
@@ -215,6 +216,9 @@ export function DiagnosticsView() {
 
   return (
     <div className="space-y-6">
+      {/* Export toolbar — markdown report for Claude Code + file downloads */}
+      <DiagnosticsExport />
+
       {/* Diagnosis banner */}
       <Card
         className={cn(
@@ -301,6 +305,44 @@ export function DiagnosticsView() {
         )}
       </div>
 
+      {/* Execution quality (v2 instrumentation — planned R:R, excursions, churn) */}
+      {(data.rr?.coverage ?? 0) > 0 || (data.churn?.trades_per_day ?? 0) > 0 ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {data.rr && data.rr.coverage > 0 && (
+            <MetricCard
+              label="Planned vs realized R"
+              value={`${data.rr.avg_planned_rr.toFixed(2)} → ${data.rr.avg_realized_r.toFixed(2)}R`}
+              sub={`${data.rr.coverage}/${data.total_trades} instrumented · overshoot ${data.rr.stop_overshoot_pct}%`}
+              tone={data.rr.avg_realized_r >= 0 ? "good" : "bad"}
+            />
+          )}
+          {data.mae_mfe && data.mae_mfe.coverage > 0 && (
+            <MetricCard
+              label="Losers once ≥1% up"
+              value={`${data.mae_mfe.losers_profitable_1pct.toFixed(0)}%`}
+              sub={`Avg loser MFE ${data.mae_mfe.avg_mfe_losers_pct.toFixed(2)}% — clipped winners signal`}
+              tone={data.mae_mfe.losers_profitable_1pct >= 25 ? "bad" : "neutral"}
+            />
+          )}
+          {data.churn && (
+            <MetricCard
+              label="Churn"
+              value={`${data.churn.trades_per_day.toFixed(1)}/day`}
+              sub={`${data.churn.reentries_within_window} re-entries within ${data.churn.window_h}h`}
+              tone={data.churn.reentries_within_window > 0 ? "bad" : "neutral"}
+            />
+          )}
+          {data.risk && (
+            <MetricCard
+              label="Sharpe (daily, ann.)"
+              value={data.risk.sharpe_daily_ann.toFixed(2)}
+              sub={`${data.risk.daily_return_days} trading days`}
+              tone={data.risk.sharpe_daily_ann >= 0 ? "good" : "bad"}
+            />
+          )}
+        </div>
+      ) : null}
+
       {/* Breakdowns */}
       <Card className="border-border/60 bg-card/70 backdrop-blur">
         <CardHeader>
@@ -317,6 +359,7 @@ export function DiagnosticsView() {
               <TabsTrigger value="bucket">Bucket</TabsTrigger>
               <TabsTrigger value="strategy">Strategy</TabsTrigger>
               <TabsTrigger value="regime">Regime</TabsTrigger>
+              <TabsTrigger value="hour">Entry hour</TabsTrigger>
             </TabsList>
             <TabsContent value="reason">
               <BreakdownTable rows={data.by_reason ?? []} keyLabel="Exit reason" />
@@ -332,6 +375,9 @@ export function DiagnosticsView() {
             </TabsContent>
             <TabsContent value="regime">
               <BreakdownTable rows={data.by_regime ?? []} keyLabel="Regime" emptyNote={attrNote} />
+            </TabsContent>
+            <TabsContent value="hour">
+              <BreakdownTable rows={data.by_hour ?? []} keyLabel="Hour (UTC)" />
             </TabsContent>
           </Tabs>
         </CardContent>

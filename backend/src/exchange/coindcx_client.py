@@ -322,8 +322,10 @@ class CoinDCXClient:
         Build the scan universe:
         - always include the configured large caps (BTC/ETH) so the bot can act
           on them regardless of momentum rank;
-        - of the remaining USDT pairs, keep only those above the 24h quote-volume
-          floor (skip thin/illiquid markets), rank by momentum, take the top-N.
+        - of the remaining USDT pairs, keep those above the 24h quote-volume
+          floor, not already pumped past MAX_24H_CHANGE_PCT (buying the top of a
+          finished move was the July failure mode), and with an acceptable
+          bid/ask spread; rank by momentum, take the top-N.
         Returns core symbols first, then ranked momentum picks (deduped).
         """
         symbols = self.get_quote_symbols()
@@ -338,15 +340,28 @@ class CoinDCXClient:
             volume = t.get("quoteVolume") or 0.0
             if volume < settings.MIN_24H_QUOTE_VOLUME:
                 continue
-            rows.append({"symbol": sym, "change": t.get("percentage") or 0.0,
-                         "volume": volume})
+            change = t.get("percentage") or 0.0
+            if (settings.MAX_24H_CHANGE_PCT is not None
+                    and change > settings.MAX_24H_CHANGE_PCT):
+                continue
+            # Spread filter — only when the ticker carries both sides; a data
+            # gap must not empty the universe.
+            bid, ask = t.get("bid"), t.get("ask")
+            if settings.MAX_SPREAD_PCT is not None and bid and ask:
+                mid = (bid + ask) / 2
+                if mid > 0 and (ask - bid) / mid > settings.MAX_SPREAD_PCT:
+                    log.debug("Universe: %s excluded on spread %.2f%%",
+                              sym, (ask - bid) / mid * 100)
+                    continue
+            rows.append({"symbol": sym, "change": change, "volume": volume})
 
         ranked: list[str] = []
         if rows:
+            w = settings.MOMENTUM_CHANGE_WEIGHT
             df = pd.DataFrame(rows)
             df["change_rank"] = df["change"].rank(ascending=True)
             df["volume_rank"] = df["volume"].rank(ascending=True)
-            df["score"] = (df["change_rank"] + df["volume_rank"]) / 2
+            df["score"] = w * df["change_rank"] + (1 - w) * df["volume_rank"]
             df = df[df["change"] > 0].sort_values("score", ascending=False)
             ranked = df["symbol"].head(n).tolist()
 
@@ -357,6 +372,8 @@ class CoinDCXClient:
             if sym not in seen:
                 seen.add(sym)
                 out.append(sym)
+        log.info("Universe: %d symbols (%d momentum picks of top-%d requested)",
+                 len(out), len(ranked), n)
         return out
 
     def fetch_ohlcv(self, symbol: str, timeframe: str = settings.TIMEFRAME,

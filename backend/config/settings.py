@@ -68,10 +68,28 @@ FAST_POLL_S     = 15
 # so the bot can always act on BTC/ETH (deep liquidity, tight spreads).
 CORE_SYMBOLS    = ["BTC/USDT", "ETH/USDT"]
 # Skip thinly-traded pairs: minimum 24h quote (USDT) volume to be eligible.
-MIN_24H_QUOTE_VOLUME = 250_000.0
+# Raised from 250k after the July 2026 paper run: every liquid major was
+# profitable while sub-$1M micro-caps took -8..-14% gap-through losses.
+MIN_24H_QUOTE_VOLUME = 1_000_000.0
+# Anti-chase: exclude coins already up more than this % in 24h — the momentum
+# ranker was buying the top of finished pumps. None disables (legacy behavior).
+MAX_24H_CHANGE_PCT = 20.0
+# Universe score = w·change_rank + (1-w)·volume_rank. 0.5 (legacy) chased the
+# biggest movers; 0.3 favours liquid names that are still moving.
+MOMENTUM_CHANGE_WEIGHT = 0.3
+# Exclude pairs whose bid/ask spread exceeds this fraction of mid-price.
+# Applied only when the ticker carries both sides. None disables (legacy).
+MAX_SPREAD_PCT = 0.01
 # Minimum notional per order (USDT). CoinDCX min-notional is a few dollars;
 # this also stops dust trades from the paper trader.
 MIN_TRADE_USDT  = 5.0
+
+# ── Churn control ─────────────────────────────────────────────────────────────
+# July 2026: no cooldowns meant single symbols were traded up to 21× and fees
+# ate ~12% of gross losses. 0 disables any of these (legacy behavior).
+REENTRY_COOLDOWN_S = 3600            # after any exit, wait 1 bar before re-entry
+STOPOUT_COOLDOWN_S = 14_400          # after a stop-out, wait 4 bars
+MAX_TRADES_PER_SYMBOL_PER_DAY = 2    # per UTC day; 0 = unlimited
 
 # ── Technical Analysis ────────────────────────────────────────────────────────
 TIMEFRAME        = "1h"
@@ -119,11 +137,33 @@ ATR_SL_MULT_DAY = 2.0      # tighter stops for day-trades
 ATR_TP_MULT_DAY = 3.0
 ATR_SL_MULT_LONG= 3.0      # wider stops for long-term holds
 ATR_TP_MULT_LONG= 6.0
+# Hard per-trade loss cap: floor the ATR stop at entry×(1−cap) so a single
+# high-ATR entry can't risk -8..-14% (July gap-throughs). None disables.
+MAX_STOP_DISTANCE_PCT_DAY  = 0.05
+MAX_STOP_DISTANCE_PCT_LONG = 0.08
+
+# ── Trailing stop ─────────────────────────────────────────────────────────────
+# "atr_r"     — arm once the trade is +TRAIL_ARM_R × R (R = initial stop
+#               distance), then trail TRAIL_ATR_MULT_*×ATR below the high.
+#               Arming at +1R with trail = SL multiple parks the stop exactly at
+#               breakeven, and the wide trail lets winners actually reach the
+#               ATR take-profit (July: 0 TP hits / 117 stop-outs on the fixed
+#               trail because +3%-arm/2%-offset capped every winner at ~+1%).
+# "fixed_pct" — legacy behavior: arm at TRAILING_STOP_TRIGGER gain, trail
+#               TRAILING_STOP_OFFSET below the high.
+TRAILING_MODE       = "atr_r"
+TRAIL_ARM_R         = 1.0
+TRAIL_ATR_MULT_DAY  = 2.0
+TRAIL_ATR_MULT_LONG = 3.0
 
 # ── Position sizing (fractional Kelly + ATR risk) — AGGRESSIVE profile ─────────
 RISK_PER_TRADE   = 0.04    # risk ~4% of bucket capital per trade
 KELLY_FRACTION   = 0.6     # fraction of full Kelly to apply (0 disables Kelly)
 KELLY_MIN_TRADES = 20      # don't trust Kelly until this many closed trades
+KELLY_LOOKBACK_TRADES = 30 # rolling window for the edge estimate; 0 = all history
+# When the rolling Kelly estimate goes negative the edge is demonstrably bad:
+# scale risk by this instead of the old hardcoded 0.5.
+NEGATIVE_EDGE_RISK_MULT = 0.25
 
 # ── Drawdown circuit-breakers (per bucket) — AGGRESSIVE thresholds ────────────
 DRAWDOWN_REDUCE_PCT = 0.15  # halve sizing
@@ -145,6 +185,11 @@ TAKE_PROFIT_PCT      = 0.06
 TRAILING_STOP_TRIGGER= 0.03
 TRAILING_STOP_OFFSET = 0.02
 DAILY_LOSS_LIMIT_USDT = 100.0
+
+# ── Diagnostics / export ──────────────────────────────────────────────────────
+CHURN_REENTRY_WINDOW_H = 24   # same-symbol re-entry within this window counts as churn
+EXPORT_WORST_BEST_N    = 10   # worst/best trade detail rows in the export report
+EXPORT_TRADE_LOG_LIMIT = 500  # cap on the per-trade log appendix (most recent)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_LEVEL = "INFO"

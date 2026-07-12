@@ -45,10 +45,13 @@ src/
     user_worker.py              UserBot: main tick + fast SL/TP loop + bucket routing
     orchestrator.py             BotOrchestrator — per-user worker pool
   backtest/
-    engine.py                   historical replay + walk-forward
+    engine.py                   historical replay + walk-forward (models trailing,
+                                cooldowns, stop floor — same helpers as live)
     metrics.py                  Sharpe, max-DD, profit factor, win-rate, expectancy
-    run.py                      validation gate runner (GO / NO-GO)
-  monitoring/                   logger, Telegram alerts, dashboard
+    run.py                      validation gate runner (GO / NO-GO); --profile
+                                legacy|improved A/B + exit-reason histogram
+  monitoring/                   logger, Telegram alerts, report.py (diagnostics
+                                export report builder + settings_snapshot)
   security/crypto.py            envelope encryption (KEK→DEK) for user credentials
   db/
     engine.py                   SQLAlchemy engine + session_scope (TLS-enforced)
@@ -64,10 +67,11 @@ src/
     credentials.py              per-user CoinDCX/Telegram credential CRUD + validate
     control.py                  start/stop/mode (live mode hard-gated)
     allocation.py               capital-allocation endpoints
+    diagnostics.py              trade diagnostics + export report (md/json)
     validation.py               read-only credential validation (sanitized errors)
     main.py                     FastAPI app: middleware, /health, REST, WS
   runner.py                     Entry point — scanner + orchestrator + API thread
-migrations/                     Alembic (0001 multi-tenant → 0004 allocation)
+migrations/                     Alembic (0001 multi-tenant → 0006 diagnostics v2)
 tests/                          pytest (no network/keys; uses fakes)
 Dockerfile / fly.toml
 ```
@@ -87,6 +91,9 @@ python src/runner.py   # API on http://localhost:8000
 ```bash
 pytest tests/ -v                       # no network or API keys required
 python -m src.backtest.run BTC/USDT ETH/USDT   # walk-forward GO/NO-GO gate (needs network)
+# A/B the post-July strategy changes: legacy = July parameterisation
+python -m src.backtest.run --profile legacy   BTC/USDT ETH/USDT AAVE/USDT
+python -m src.backtest.run --profile improved BTC/USDT ETH/USDT AAVE/USDT
 ```
 
 ---
@@ -118,6 +125,8 @@ All `/api/*` routes require `Authorization: Bearer <clerk_jwt>`. `/health` is pu
 | GET | `/health` | 200 if scanner thread alive (Fly health check) |
 | GET | `/api/status` | Bot running state, mode, last scan, daily P&L |
 | GET | `/api/portfolio` (+`/history`) | Summary + stats; P&L history |
+| GET | `/api/portfolio/diagnostics` | Loss-attribution analytics (edge, R:R, MAE/MFE, churn, breakdowns) |
+| GET | `/api/portfolio/diagnostics/export?format=markdown\|json` | Self-describing diagnostics report — the markdown is built to paste into Claude Code |
 | GET | `/api/positions` | Open positions with live prices |
 | GET | `/api/trades?limit=` | Trade history |
 | GET | `/api/signals` | Last scan results (incl. regime + bucket) |
@@ -177,7 +186,7 @@ Validation before live: [../deploy/VALIDATION-RUNBOOK.md](../deploy/VALIDATION-R
   `CLERK_JWKS_URL`, `API_CORS_ORIGINS`, `LIVE_TRADING_ENABLED`, `REDDIT_*`.
 - **Single instance only** — the in-memory scanner cache / per-user threads can't be
   horizontally scaled. Persist state to the DB rather than going multi-worker.
-- Run migrations from your machine: `alembic upgrade head` (chain `0001 → 0004`).
+- Run migrations from your machine: `alembic upgrade head` (chain `0001 → 0006`).
 
 **Alternative (self-hosted VM)**: OCI/EC2 + Cloudflare Tunnel — see [../deploy/README.md](../deploy/README.md).
 

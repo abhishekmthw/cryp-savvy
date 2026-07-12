@@ -95,6 +95,47 @@ export interface DiagnosticsFees {
   est_total_cost_usdt: number;
   est_cost_per_trade: number;
   pct_of_gross_loss: number;
+  // v2 — actual per-trade costs (present once instrumented trades exist)
+  actual_fee_usdt?: number;
+  actual_slippage_usdt?: number;
+  actual_total_cost_usdt?: number;
+  actual_cost_per_trade?: number;
+  trades_with_fee_data?: number;
+}
+
+export interface DiagnosticsRR {
+  coverage: number;
+  avg_planned_risk_pct: number;
+  avg_planned_reward_pct: number;
+  avg_planned_rr: number;
+  avg_realized_r: number;
+  avg_win_realized_r: number;
+  avg_loss_realized_r: number;
+  stop_overshoot_pct: number;
+}
+
+export interface DiagnosticsMaeMfe {
+  coverage: number;
+  avg_mfe_winners_pct: number;
+  avg_mfe_losers_pct: number;
+  avg_mae_winners_pct: number;
+  avg_mae_losers_pct: number;
+  losers_profitable_1pct: number;
+  losers_reached_half_tp: number;
+}
+
+export interface DiagnosticsChurn {
+  period_days: number;
+  trades_per_day: number;
+  window_h: number;
+  reentries_within_window: number;
+  median_reentry_minutes: number;
+  top_reentered: { symbol: string; entries: number; reentries: number; median_gap_min: number }[];
+}
+
+export interface DiagnosticsRisk {
+  sharpe_daily_ann: number;
+  daily_return_days: number;
 }
 
 export interface DiagnosticsDuration {
@@ -118,12 +159,29 @@ export interface Diagnostics {
   edge?: DiagnosticsEdge;
   fees?: DiagnosticsFees;
   duration?: DiagnosticsDuration;
+  rr?: DiagnosticsRR;
+  mae_mfe?: DiagnosticsMaeMfe;
+  churn?: DiagnosticsChurn;
+  risk?: DiagnosticsRisk;
   by_reason?: DiagnosticsGroup[];
   by_symbol?: DiagnosticsGroup[];
   by_bucket?: DiagnosticsGroup[];
   by_strategy?: DiagnosticsGroup[];
   by_regime?: DiagnosticsGroup[];
-  coverage?: { attributed_trades: number; unattributed_trades: number };
+  by_hour?: DiagnosticsGroup[];
+  coverage?: {
+    attributed_trades: number;
+    unattributed_trades: number;
+    instrumented_trades?: number;
+  };
+}
+
+export interface DiagnosticsExport {
+  schema_version: number;
+  meta: Record<string, unknown>;
+  config: Record<string, unknown>;
+  diagnostics: Diagnostics;
+  trades: Record<string, unknown>[];
 }
 
 export interface ProviderStatus {
@@ -201,6 +259,20 @@ async function apiFetch<T>(
   return res.json() as Promise<T>;
 }
 
+/** Like apiFetch but returns the raw response body as text (markdown export). */
+async function apiFetchText(path: string, token: string): Promise<string> {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = new Error(`API ${res.status}`) as Error & { status: number };
+    err.status = res.status;
+    throw err;
+  }
+  return res.text();
+}
+
 // ── Public API calls ───────────────────────────────────────────────────────────
 
 export const api = {
@@ -220,6 +292,13 @@ export const api = {
 
   diagnostics: (token: string) =>
     apiFetch<Diagnostics>("/api/portfolio/diagnostics", token),
+
+  // Export report — markdown is the "paste into Claude Code" artifact.
+  diagnosticsExportMarkdown: (token: string) =>
+    apiFetchText("/api/portfolio/diagnostics/export?format=markdown", token),
+
+  diagnosticsExportJson: (token: string) =>
+    apiFetch<DiagnosticsExport>("/api/portfolio/diagnostics/export?format=json", token),
 
   positions: (token: string) =>
     apiFetch<{ positions: Position[] }>("/api/positions", token),

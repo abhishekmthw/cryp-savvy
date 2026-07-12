@@ -75,11 +75,69 @@ def evaluate(df: pd.DataFrame, tech: dict) -> dict:
     }
 
 
+def bucket_mults(bucket: str) -> tuple[float, float]:
+    """(sl_mult, tp_mult) for a bucket."""
+    if bucket == LONG:
+        return settings.ATR_SL_MULT_LONG, settings.ATR_TP_MULT_LONG
+    return settings.ATR_SL_MULT_DAY, settings.ATR_TP_MULT_DAY
+
+
 def atr_stops(entry_price: float, atr_val: float, bucket: str) -> tuple[float, float]:
     """ATR-based stop-loss / take-profit for a long entry, scaled by bucket
-    (tighter for day-trades, wider for long-term holds)."""
+    (tighter for day-trades, wider for long-term holds).
+
+    The stop is floored at entry×(1−MAX_STOP_DISTANCE_PCT_*) — a hard per-trade
+    loss cap so one high-ATR entry can't risk -8..-14%. The TP is never
+    adjusted, so the entry ATR stays derivable from (tp − entry) / tp_mult.
+    """
     if bucket == LONG:
         sl_mult, tp_mult = settings.ATR_SL_MULT_LONG, settings.ATR_TP_MULT_LONG
+        max_dist = settings.MAX_STOP_DISTANCE_PCT_LONG
     else:
         sl_mult, tp_mult = settings.ATR_SL_MULT_DAY, settings.ATR_TP_MULT_DAY
-    return (entry_price - sl_mult * atr_val, entry_price + tp_mult * atr_val)
+        max_dist = settings.MAX_STOP_DISTANCE_PCT_DAY
+    stop = entry_price - sl_mult * atr_val
+    if max_dist is not None:
+        stop = max(stop, entry_price * (1 - max_dist))
+    return (stop, entry_price + tp_mult * atr_val)
+
+
+def entry_atr_from_stops(entry_price: float, take_profit: float, bucket: str) -> float:
+    """Recover the ATR that was in effect at entry from the persisted, immutable
+    (entry_price, take_profit) pair. atr_stops never adjusts the TP, so
+    tp = entry + tp_mult·atr holds exactly — this makes ATR-based trailing
+    restart-safe with no schema change. Returns 0.0 for fixed-pct positions."""
+    _, tp_mult = bucket_mults(bucket)
+    if tp_mult <= 0:
+        return 0.0
+    return (take_profit - entry_price) / tp_mult
+
+
+def trail_stop(entry_price: float, take_profit: float, trailing_high: float,
+               bucket: str, cfg_trigger: float, cfg_offset: float) -> float | None:
+    """Candidate trailing stop for a long position, or None while unarmed.
+
+    Shared by the paper trader and the backtest engine so live exits and the
+    validation gate are the same math by construction. The caller must ratchet:
+    stop = max(stop, candidate).
+
+    "atr_r" mode arms once the high is +TRAIL_ARM_R × R above entry
+    (R = sl_mult·ATR, the initial risk) and trails TRAIL_ATR_MULT_*×ATR below
+    the high — at the arming moment with trail mult == sl_mult that is exactly
+    breakeven. "fixed_pct" mode is the legacy percent trigger/offset.
+    """
+    if settings.TRAILING_MODE == "atr_r":
+        atr_val = entry_atr_from_stops(entry_price, take_profit, bucket)
+        if atr_val > 0:
+            sl_mult, _ = bucket_mults(bucket)
+            arm_gain = settings.TRAIL_ARM_R * sl_mult * atr_val
+            if trailing_high - entry_price >= arm_gain:
+                trail_mult = (settings.TRAIL_ATR_MULT_LONG if bucket == LONG
+                              else settings.TRAIL_ATR_MULT_DAY)
+                return trailing_high - trail_mult * atr_val
+            return None
+        # Fixed-pct position (ATR unavailable at entry) — fall through to legacy.
+    gain_pct = (trailing_high - entry_price) / entry_price if entry_price else 0.0
+    if gain_pct >= cfg_trigger:
+        return trailing_high * (1 - cfg_offset)
+    return None

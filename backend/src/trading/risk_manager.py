@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import sys
 import os
+import time
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from config import settings
 from src.bot.config import BotConfig
@@ -34,6 +36,25 @@ class RiskManager:
 
         if symbol in self._trader.positions:
             return False, f"Already have an open position in {symbol}"
+
+        # Churn control: re-entry cooldowns (longer after a stop-out) and a
+        # per-symbol daily entry cap. A setting of 0 disables the check.
+        last = getattr(self._trader, "last_exit", {}).get(symbol)
+        if last is not None:
+            exit_ts, exit_reason = last
+            cooldown = (settings.STOPOUT_COOLDOWN_S if exit_reason == "stop_loss"
+                        else settings.REENTRY_COOLDOWN_S)
+            elapsed = time.time() - exit_ts
+            if cooldown > 0 and elapsed < cooldown:
+                wait_m = (cooldown - elapsed) / 60
+                return False, (f"{symbol} in re-entry cooldown after "
+                               f"{exit_reason} ({wait_m:.0f}m left)")
+
+        cap = settings.MAX_TRADES_PER_SYMBOL_PER_DAY
+        if cap > 0:
+            count = getattr(self._trader, "symbol_trades_today", {}).get(symbol, 0)
+            if count >= cap:
+                return False, f"{symbol} hit the daily trade cap ({cap}/day)"
 
         if self._alloc is not None:
             state = self._bucket_state(bucket)
@@ -87,11 +108,16 @@ class RiskManager:
 
     def _risk_fraction(self) -> float:
         """Base risk-per-trade, reduced by fractional Kelly once the closed-trade
-        sample is large enough to estimate an edge."""
+        sample is large enough to estimate an edge. Kelly is computed over a
+        rolling window (KELLY_LOOKBACK_TRADES) so the estimate tracks the
+        *current* edge; a negative estimate scales risk down hard
+        (NEGATIVE_EDGE_RISK_MULT) instead of the old 0.5 floor."""
         base = settings.RISK_PER_TRADE
         trades = getattr(self._trader, "closed_trades", [])
         if settings.KELLY_FRACTION <= 0 or len(trades) < settings.KELLY_MIN_TRADES:
             return base
+        if settings.KELLY_LOOKBACK_TRADES > 0:
+            trades = trades[-settings.KELLY_LOOKBACK_TRADES:]
         wins = [t for t in trades if (t.get("pnl") or 0) > 0]
         losses = [t for t in trades if (t.get("pnl") or 0) < 0]
         if not wins or not losses:
@@ -104,7 +130,8 @@ class RiskManager:
         payoff = avg_win / avg_loss
         kelly = win_rate - (1 - win_rate) / payoff
         frac = settings.KELLY_FRACTION * max(0.0, kelly)
-        return float(min(base, frac)) if frac > 0 else base * 0.5
+        return (float(min(base, frac)) if frac > 0
+                else base * settings.NEGATIVE_EDGE_RISK_MULT)
 
     def should_exit(self, symbol: str, current_price: float) -> tuple[bool, str]:
         reason = self._trader.check_exit_conditions(symbol, current_price)

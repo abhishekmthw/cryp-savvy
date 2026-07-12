@@ -197,11 +197,23 @@ class UserBot:
                 amount_usdt = self._risk.position_size_usdt(price=price, atr=atr, bucket=bucket)
                 if amount_usdt < settings.MIN_TRADE_USDT:
                     continue
+                details = analysis.get("details") or {}
+                scores = {
+                    "ema":       details.get("ema_score"),
+                    "rsi":       details.get("rsi_score"),
+                    "macd":      details.get("macd_score"),
+                    "volume":    details.get("volume_score"),
+                    "technical": details.get("technical_total"),
+                    "rsi_value": details.get("rsi_value"),
+                    "sentiment": analysis.get("sentiment_score"),
+                    "composite": analysis.get("composite_score"),
+                }
                 order = self._order_mgr.buy(
                     sym, amount_usdt, price, atr=atr, bucket=bucket,
                     strategy=analysis.get("strategy", "none"),
                     regime=analysis.get("regime"),
                     score=analysis.get("composite_score"),
+                    scores=scores,
                 )
             if order:
                 self._persist_position(sym)
@@ -501,6 +513,14 @@ def _restore_state(bot: "UserBot", portfolio: Portfolio, cfg: BotConfig,
             bot._paper.restore_position(p)
         from src.exchange.paper_trader import _utc_day_start
         bot._paper.restore_daily_pnl(portfolio.daily_realized_pnl(_utc_day_start()))
+        # Re-seed churn cooldowns, per-day entry counts, and the Kelly edge
+        # window from recent trade rows — previously Kelly (and any cooldown)
+        # silently reset on every restart.
+        lookback = max(50, settings.KELLY_LOOKBACK_TRADES, settings.KELLY_MIN_TRADES)
+        recent = portfolio.recent_trades(limit=lookback)
+        recent.reverse()  # oldest → newest so closed_trades[-N:] is the newest N
+        bot._paper.closed_trades = [{"pnl": t.get("pnl") or 0.0} for t in recent]
+        bot._paper.seed_churn_state(recent)
         if positions:
             log.info("Restored %d open position(s) for %s from DB",
                      len(positions), bot.user_id[:8])

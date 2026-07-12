@@ -151,6 +151,15 @@ def record_trade(db: Session, *, user_id: str, trade: dict) -> None:
         entry_score=trade.get("entry_score"),
         duration_s=trade.get("duration_s"),
         ts=time.time(),
+        # Diagnostics v2 (0006) — execution detail captured at close.
+        entry_ts=trade.get("entry_ts"),
+        planned_stop_loss=trade.get("planned_stop_loss"),
+        planned_take_profit=trade.get("planned_take_profit"),
+        mae_pct=trade.get("mae_pct"),
+        mfe_pct=trade.get("mfe_pct"),
+        fee_usdt=trade.get("fee_usdt"),
+        slippage_usdt=trade.get("slippage_usdt"),
+        scores=trade.get("scores"),
     ))
 
 
@@ -177,6 +186,7 @@ def trades_for_user(db: Session, user_id: str, limit: int = 50, offset: int = 0)
         "entry_score": _f(t.entry_score),
         "duration_s":  _f(t.duration_s),
         "ts":          t.ts,
+        "entry_ts":    _f(t.entry_ts),
     } for t in rows]
 
 
@@ -244,6 +254,10 @@ def trade_diagnostics(db: Session, user_id: str, initial_capital: float = 0.0) -
     def _f(v) -> float:
         return float(v) if v is not None else 0.0
 
+    def _opt(v) -> float | None:
+        # None-preserving cast — v2 sections track coverage, so NULL ≠ 0.
+        return float(v) if v is not None else None
+
     trades = [{
         "pnl":         _f(t.pnl),
         "pnl_pct":     _f(t.pnl_pct),
@@ -254,6 +268,17 @@ def trade_diagnostics(db: Session, user_id: str, initial_capital: float = 0.0) -
         "regime":      t.regime or "unknown",
         "amount_usdt": _f(t.amount_usdt),
         "duration_s":  _f(t.duration_s),
+        # v2 fields (0006) — None on pre-instrumentation rows.
+        "ts":            float(t.ts),
+        "entry_ts":      (float(t.entry_ts) if t.entry_ts is not None
+                          else float(t.ts) - _f(t.duration_s)),
+        "entry_price":   _opt(t.entry_price),
+        "planned_sl":    _opt(t.planned_stop_loss),
+        "planned_tp":    _opt(t.planned_take_profit),
+        "mae_pct":       _opt(t.mae_pct),
+        "mfe_pct":       _opt(t.mfe_pct),
+        "fee_usdt":      _opt(t.fee_usdt),
+        "slippage_usdt": _opt(t.slippage_usdt),
     } for t in rows]
 
     total  = len(trades)
@@ -299,6 +324,21 @@ def trade_diagnostics(db: Session, user_id: str, initial_capital: float = 0.0) -
         "est_cost_per_trade":  round(est_cost / total, 4),
         "pct_of_gross_loss":   round(est_cost / gross_loss_abs * 100, 1),
     }
+    # v2: ACTUAL costs, from trades that recorded them (paper-modeled; live
+    # fills are net of fees so those rows stay NULL — hence the coverage count).
+    fee_rows = [t for t in trades if t["fee_usdt"] is not None]
+    if fee_rows:
+        actual_fee  = sum(t["fee_usdt"] for t in fee_rows)
+        actual_slip = sum(t["slippage_usdt"] or 0.0 for t in fee_rows)
+        fees.update({
+            "actual_fee_usdt":        round(actual_fee, 2),
+            "actual_slippage_usdt":   round(actual_slip, 2),
+            "actual_total_cost_usdt": round(actual_fee + actual_slip, 2),
+            "actual_cost_per_trade":  round((actual_fee + actual_slip) / len(fee_rows), 4),
+            "trades_with_fee_data":   len(fee_rows),
+        })
+    else:
+        fees["trades_with_fee_data"] = 0
 
     # Hold-time: are losers held longer than winners (letting losses run)?
     win_durs  = [t["duration_s"] for t, p in zip(trades, pnls) if p > 0]
@@ -329,6 +369,117 @@ def trade_diagnostics(db: Session, user_id: str, initial_capital: float = 0.0) -
         # Biggest bleeders (most negative total P&L) first.
         return sorted(out, key=lambda r: r["total_pnl"])
 
+    # ── v2: planned vs realized R:R ──────────────────────────────────────────
+    rr_rows = []
+    for t in trades:
+        e, sl, tp = t["entry_price"], t["planned_sl"], t["planned_tp"]
+        if not e or sl is None or tp is None:
+            continue
+        risk_pct = (e - sl) / e * 100
+        reward_pct = (tp - e) / e * 100
+        if risk_pct <= 0:
+            continue
+        rr_rows.append({
+            "risk_pct": risk_pct, "reward_pct": reward_pct,
+            "rr": reward_pct / risk_pct,
+            "realized_r": t["pnl_pct"] / risk_pct,
+            "pnl": t["pnl"], "pnl_pct": t["pnl_pct"], "reason": t["reason"],
+        })
+    rr_wins   = [r["realized_r"] for r in rr_rows if r["pnl"] > 0]
+    rr_losses = [r["realized_r"] for r in rr_rows if r["pnl"] < 0]
+    stop_exits = [r for r in rr_rows if r["reason"] == "stop_loss"]
+    # Lost more than planned (gap/slippage past the stop, 0.1pct-pt tolerance).
+    overshoots = [r for r in stop_exits if abs(r["pnl_pct"]) > r["risk_pct"] + 0.1]
+    rr = {
+        "coverage":               len(rr_rows),
+        "avg_planned_risk_pct":   round(mean(r["risk_pct"] for r in rr_rows), 2) if rr_rows else 0.0,
+        "avg_planned_reward_pct": round(mean(r["reward_pct"] for r in rr_rows), 2) if rr_rows else 0.0,
+        "avg_planned_rr":         round(mean(r["rr"] for r in rr_rows), 2) if rr_rows else 0.0,
+        "avg_realized_r":         round(mean(r["realized_r"] for r in rr_rows), 3) if rr_rows else 0.0,
+        "avg_win_realized_r":     round(mean(rr_wins), 3) if rr_wins else 0.0,
+        "avg_loss_realized_r":    round(mean(rr_losses), 3) if rr_losses else 0.0,
+        "stop_overshoot_pct":     (round(len(overshoots) / len(stop_exits) * 100, 1)
+                                   if stop_exits else 0.0),
+    }
+
+    # ── v2: MAE/MFE excursion analysis ───────────────────────────────────────
+    exc = [t for t in trades if t["mfe_pct"] is not None and t["mae_pct"] is not None]
+    exc_wins   = [t for t in exc if t["pnl"] > 0]
+    exc_losses = [t for t in exc if t["pnl"] < 0]
+    # Losers with planned-reward data, for the "reached ≥50% of target" cut.
+    loss_with_plan = [t for t in exc_losses
+                      if t["entry_price"] and t["planned_tp"] is not None]
+    reached_half_tp = [
+        t for t in loss_with_plan
+        if t["mfe_pct"] >= ((t["planned_tp"] - t["entry_price"])
+                            / t["entry_price"] * 100) * 0.5
+    ]
+    mae_mfe = {
+        "coverage":            len(exc),
+        "avg_mfe_winners_pct": round(mean(t["mfe_pct"] for t in exc_wins), 2) if exc_wins else 0.0,
+        "avg_mfe_losers_pct":  round(mean(t["mfe_pct"] for t in exc_losses), 2) if exc_losses else 0.0,
+        "avg_mae_winners_pct": round(mean(t["mae_pct"] for t in exc_wins), 2) if exc_wins else 0.0,
+        "avg_mae_losers_pct":  round(mean(t["mae_pct"] for t in exc_losses), 2) if exc_losses else 0.0,
+        # % of losers that were ≥1% in profit at some point — the direct
+        # "winners being clipped into losers" signal.
+        "losers_profitable_1pct": (round(sum(1 for t in exc_losses if t["mfe_pct"] >= 1.0)
+                                         / len(exc_losses) * 100, 1) if exc_losses else 0.0),
+        "losers_reached_half_tp": (round(len(reached_half_tp) / len(loss_with_plan) * 100, 1)
+                                   if loss_with_plan else 0.0),
+    }
+
+    # ── v2: churn ────────────────────────────────────────────────────────────
+    from statistics import median
+    period_days = max((trades[-1]["ts"] - trades[0]["ts"]) / 86_400.0, 1.0)
+    window_s = settings.CHURN_REENTRY_WINDOW_H * 3600
+    sym_groups: dict[str, list[dict]] = {}
+    for t in trades:
+        sym_groups.setdefault(t["symbol"], []).append(t)
+    all_gaps: list[float] = []
+    reentered = []
+    for sym, ts_list in sym_groups.items():
+        ordered = sorted(ts_list, key=lambda x: x["entry_ts"])
+        gaps = []
+        for prev, nxt in zip(ordered, ordered[1:]):
+            gap = nxt["entry_ts"] - prev["ts"]   # exit of one → entry of next
+            if 0 <= gap <= window_s:
+                gaps.append(gap)
+        if gaps:
+            all_gaps.extend(gaps)
+            reentered.append({"symbol": sym, "entries": len(ordered),
+                              "reentries": len(gaps),
+                              "median_gap_min": round(median(gaps) / 60, 1)})
+    reentered.sort(key=lambda r: r["reentries"], reverse=True)
+    churn = {
+        "period_days":             round(period_days, 1),
+        "trades_per_day":          round(total / period_days, 2),
+        "window_h":                settings.CHURN_REENTRY_WINDOW_H,
+        "reentries_within_window": len(all_gaps),
+        "median_reentry_minutes":  round(median(all_gaps) / 60, 1) if all_gaps else 0.0,
+        "top_reentered":           reentered[:5],
+    }
+
+    # ── v2: daily-annualised Sharpe from realized P&L ────────────────────────
+    daily_pnl: dict[int, float] = {}
+    for t in trades:
+        day = int(t["ts"] // 86_400)
+        daily_pnl[day] = daily_pnl.get(day, 0.0) + t["pnl"]
+    daily_returns: list[float] = []
+    if initial_capital and float(initial_capital) > 0:
+        equity_d = float(initial_capital)
+        for day in sorted(daily_pnl):
+            daily_returns.append(daily_pnl[day] / equity_d if equity_d > 0 else 0.0)
+            equity_d += daily_pnl[day]
+    risk = {
+        "sharpe_daily_ann":  (round(metrics.sharpe(daily_returns, periods_per_year=365), 3)
+                              if len(daily_returns) >= 2 else 0.0),
+        "daily_return_days": len(daily_returns),
+    }
+
+    # ── v2: by entry hour (UTC) ──────────────────────────────────────────────
+    for t in trades:
+        t["hour"] = f"{int((t['entry_ts'] % 86_400) // 3600):02d}"
+
     attributed = sum(1 for t in trades if t["strategy"] != "unknown")
 
     return {
@@ -336,16 +487,65 @@ def trade_diagnostics(db: Session, user_id: str, initial_capital: float = 0.0) -
         "edge":         edge,
         "fees":         fees,
         "duration":     duration,
+        "rr":           rr,
+        "mae_mfe":      mae_mfe,
+        "churn":        churn,
+        "risk":         risk,
         "by_reason":    _breakdown("reason"),
         "by_symbol":    _breakdown("symbol"),
         "by_bucket":    _breakdown("bucket"),
         "by_strategy":  _breakdown("strategy"),
         "by_regime":    _breakdown("regime"),
+        "by_hour":      _breakdown("hour"),
         "coverage": {
             "attributed_trades":   attributed,
             "unattributed_trades": total - attributed,
+            "instrumented_trades": len(exc),
         },
     }
+
+
+def trades_full_for_export(db: Session, user_id: str,
+                           limit: int | None = None) -> list[dict]:
+    """Every column of the most recent ``limit`` trades, oldest-first — the
+    per-trade log for the diagnostics export report."""
+    limit = limit or settings.EXPORT_TRADE_LOG_LIMIT
+    rows = list(db.execute(
+        select(Trade)
+        .where(Trade.user_id == user_id)
+        .order_by(desc(Trade.ts))
+        .limit(limit)
+    ).scalars())
+    rows.reverse()  # oldest-first reads naturally in the report
+
+    def _opt(v):
+        return float(v) if v is not None else None
+
+    return [{
+        "symbol":              t.symbol,
+        "bucket":              t.bucket,
+        "strategy":            t.strategy,
+        "regime":              t.regime,
+        "entry_score":         _opt(t.entry_score),
+        "entry_ts":            (_opt(t.entry_ts) if t.entry_ts is not None
+                                else (float(t.ts) - float(t.duration_s or 0.0))),
+        "exit_ts":             float(t.ts),
+        "entry_price":         _opt(t.entry_price),
+        "exit_price":          _opt(t.exit_price),
+        "qty":                 _opt(t.qty),
+        "amount_usdt":         _opt(t.amount_usdt),
+        "pnl":                 _opt(t.pnl),
+        "pnl_pct":             _opt(t.pnl_pct),
+        "reason":              t.reason,
+        "planned_stop_loss":   _opt(t.planned_stop_loss),
+        "planned_take_profit": _opt(t.planned_take_profit),
+        "mae_pct":             _opt(t.mae_pct),
+        "mfe_pct":             _opt(t.mfe_pct),
+        "fee_usdt":            _opt(t.fee_usdt),
+        "slippage_usdt":       _opt(t.slippage_usdt),
+        "duration_s":          _opt(t.duration_s),
+        "scores":              t.scores,
+    } for t in rows]
 
 
 def pnl_history_for_user(db: Session, user_id: str, initial_capital: float) -> list[dict]:

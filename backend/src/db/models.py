@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from sqlalchemy import (
-    BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer,
+    JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer,
     LargeBinary, Numeric, String, UniqueConstraint, func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -127,6 +127,16 @@ class Trade(Base):
     entry_score: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)  # composite score at entry
     duration_s:  Mapped[float | None] = mapped_column(Float, nullable=True)  # time, not money
     ts:          Mapped[float] = mapped_column(Float, nullable=False)        # epoch seconds
+    # Execution detail (added 0006) — nullable; pre-0006 trades keep NULLs and
+    # diagnostics reports these sections with reduced coverage.
+    entry_ts:            Mapped[float | None] = mapped_column(Float, nullable=True)          # epoch seconds
+    planned_stop_loss:   Mapped[float | None] = mapped_column(Numeric(20, 8), nullable=True) # snapshot at entry
+    planned_take_profit: Mapped[float | None] = mapped_column(Numeric(20, 8), nullable=True)
+    mae_pct:             Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True) # max adverse excursion (≤0)
+    mfe_pct:             Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True) # max favorable excursion (≥0)
+    fee_usdt:            Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True) # actual, both sides (NULL in live)
+    slippage_usdt:       Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    scores:              Mapped[dict | None]  = mapped_column(JSON, nullable=True)           # indicator sub-scores at entry
 
     user: Mapped[User] = relationship(back_populates="trades")
 
@@ -156,6 +166,15 @@ class Position(Base):
     strategy:      Mapped[str | None] = mapped_column(String, nullable=True)
     regime:        Mapped[str | None] = mapped_column(String, nullable=True)
     entry_score:   Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    # Diagnostics v2 (added 0006) — excursion watermarks, planned stops, and
+    # entry costs persisted so MAE/MFE and planned R:R survive a restart.
+    high_water:          Mapped[float | None] = mapped_column(Numeric(20, 8), nullable=True)
+    low_water:           Mapped[float | None] = mapped_column(Numeric(20, 8), nullable=True)
+    planned_stop_loss:   Mapped[float | None] = mapped_column(Numeric(20, 8), nullable=True)
+    planned_take_profit: Mapped[float | None] = mapped_column(Numeric(20, 8), nullable=True)
+    entry_fee_usdt:      Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    entry_slippage_usdt: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    scores:              Mapped[dict | None]  = mapped_column(JSON, nullable=True)
 
     user: Mapped[User] = relationship(back_populates="positions")
 

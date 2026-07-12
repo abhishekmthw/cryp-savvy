@@ -102,9 +102,18 @@ def trader():
 
 
 def test_paper_buy_uses_atr_stops(trader):
-    pos = trader.place_market_buy("BTC/USDT", 200, current_price=100, atr=5.0, bucket="day")
-    # entry is slipped up; stop = entry - 2*ATR, take = entry + 3*ATR
-    assert pos.stop_loss == pytest.approx(pos.entry_price - settings.ATR_SL_MULT_DAY * 5.0)
+    # Small ATR: the 2×ATR stop is inside the MAX_STOP_DISTANCE cap → uncapped.
+    pos = trader.place_market_buy("BTC/USDT", 200, current_price=100, atr=1.0, bucket="day")
+    assert pos.stop_loss == pytest.approx(pos.entry_price - settings.ATR_SL_MULT_DAY * 1.0)
+    assert pos.take_profit == pytest.approx(pos.entry_price + settings.ATR_TP_MULT_DAY * 1.0)
+
+
+def test_paper_buy_stop_floored_by_loss_cap(trader):
+    # Huge ATR: 2×5.0 = 10% risk would exceed the 5% day cap → stop floored at
+    # entry×(1−cap); the take-profit keeps the full ATR distance.
+    pos = trader.place_market_buy("ETH/USDT", 200, current_price=100, atr=5.0, bucket="day")
+    assert pos.stop_loss == pytest.approx(
+        pos.entry_price * (1 - settings.MAX_STOP_DISTANCE_PCT_DAY))
     assert pos.take_profit == pytest.approx(pos.entry_price + settings.ATR_TP_MULT_DAY * 5.0)
 
 

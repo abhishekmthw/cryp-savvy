@@ -21,6 +21,7 @@ app/
     page.tsx                    Main dashboard at /
     trades/page.tsx             Full trade history at /trades
     signals/page.tsx            Full signal scanner at /signals
+    diagnostics/page.tsx        Trade diagnostics + export report at /diagnostics
     settings/page.tsx           Per-user credentials + bot config at /settings
     settings/allocation/page.tsx  Capital allocation (day/long buckets) at /settings/allocation
     onboarding/page.tsx         First-run setup wizard at /onboarding
@@ -38,6 +39,11 @@ components/
     live-events.tsx             Real-time WebSocket event feed
     signals-table.tsx           Top signals widget
     full-trades-table.tsx / full-signals-table.tsx
+    diagnostics-view.tsx        Edge metrics, R:R/MAE-MFE/churn cards, breakdowns
+    diagnostics-export.tsx      "Copy for Claude" (markdown to clipboard) +
+                                .md/.json downloads of the diagnostics report;
+                                the markdown is meant to be pasted into Claude
+                                Code to drive the next strategy-improvement round
   settings/credential-section.tsx   CoinDCX/Telegram credential entry (masked)
   onboarding/coindcx-setup-guide.tsx
 hooks/

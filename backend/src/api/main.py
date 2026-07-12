@@ -29,6 +29,7 @@ from src.api.allocation import router as allocation_router
 from src.api.auth import is_valid_clerk_sub
 from src.api.control import router as control_router
 from src.api.credentials import router as credentials_router
+from src.api.diagnostics import router as diagnostics_router
 from src.api.deps import get_current_user
 from src.api.ratelimit import SlidingWindowLimiter
 from src.api.ws_tickets import WsTicketStore
@@ -145,6 +146,7 @@ def create_app(scanner: MarketDataScanner, orchestrator: BotOrchestrator) -> Fas
     app.include_router(credentials_router)
     app.include_router(control_router)
     app.include_router(allocation_router)
+    app.include_router(diagnostics_router)
 
     # ── Health (liveness) ────────────────────────────────────────────────────
 
@@ -196,15 +198,7 @@ def create_app(scanner: MarketDataScanner, orchestrator: BotOrchestrator) -> Fas
             history = repo.pnl_history_for_user(db, user.clerk_user_id, initial)
         return {"history": history}
 
-    @app.get("/api/portfolio/diagnostics")
-    async def get_portfolio_diagnostics(user: Annotated[User, Depends(get_current_user)]):
-        """Loss-attribution breakdown of closed trades — powers the /diagnostics
-        dashboard. Read-only aggregation over the trades table."""
-        state = orchestrator.get_state(user.clerk_user_id)
-        initial = state.paper_trader.initial_capital_usdt if state.paper_trader else 10_000.0
-        with session_scope() as db:
-            diagnostics = repo.trade_diagnostics(db, user.clerk_user_id, initial)
-        return diagnostics
+    # /api/portfolio/diagnostics (+ /export) live in src/api/diagnostics.py.
 
     @app.get("/api/positions")
     async def get_positions(user: Annotated[User, Depends(get_current_user)]):

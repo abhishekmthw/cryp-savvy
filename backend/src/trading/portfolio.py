@@ -17,6 +17,11 @@ from src.db.engine import session_scope
 from src.db import repositories as repo
 
 
+def _opt_f(v) -> float | None:
+    """Numeric columns read back as Decimal — cast, preserving None."""
+    return float(v) if v is not None else None
+
+
 class Portfolio:
     def __init__(self, user_id: str, initial_capital_usdt: float):
         self._user_id = user_id
@@ -25,6 +30,12 @@ class Portfolio:
     def record_trade(self, trade: dict) -> None:
         with session_scope() as db:
             repo.record_trade(db, user_id=self._user_id, trade=trade)
+
+    def recent_trades(self, limit: int = 50) -> list[dict]:
+        """Most-recent-first closed trades — used to re-seed churn cooldowns and
+        the Kelly edge window after a restart."""
+        with session_scope() as db:
+            return repo.trades_for_user(db, self._user_id, limit=limit)
 
     # ── Orders (idempotent intent log) ────────────────────────────────────────
 
@@ -64,6 +75,13 @@ class Portfolio:
                     "regime":        getattr(p, "regime", None),
                     "entry_score":   (float(p.entry_score)
                                       if getattr(p, "entry_score", None) is not None else None),
+                    "high_water":    _opt_f(getattr(p, "high_water", None)),
+                    "low_water":     _opt_f(getattr(p, "low_water", None)),
+                    "planned_stop_loss":   _opt_f(getattr(p, "planned_stop_loss", None)),
+                    "planned_take_profit": _opt_f(getattr(p, "planned_take_profit", None)),
+                    "entry_fee_usdt":      _opt_f(getattr(p, "entry_fee_usdt", None)),
+                    "entry_slippage_usdt": _opt_f(getattr(p, "entry_slippage_usdt", None)),
+                    "scores":        getattr(p, "scores", None),
                 }
                 for p in repo.positions_for_user(db, self._user_id)
             ]

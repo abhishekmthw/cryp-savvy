@@ -38,6 +38,17 @@ def _warmup(df: pd.DataFrame) -> int:
               settings.DONCHIAN_PERIOD, settings.ATR_PERIOD) + 5
 
 
+_TIMEFRAME_S = {"1m": 60, "15m": 900, "1h": 3600, "4h": 14_400, "1d": 86_400}
+
+
+def _bar_epoch(df: pd.DataFrame, i: int) -> float:
+    """Epoch seconds for bar ``i`` — real timestamps when the index is datetime
+    (live data), else synthetic bar-number × timeframe (test fixtures)."""
+    if isinstance(df.index, pd.DatetimeIndex):
+        return df.index[i].timestamp()
+    return i * _TIMEFRAME_S.get(settings.TIMEFRAME, 3600)
+
+
 def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
                  periods_per_year: float = 365 * 24,
                  use_trailing: bool = True) -> BacktestResult:
@@ -45,11 +56,15 @@ def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
     Replay ``df`` (oldest-first OHLCV) bar by bar. Enters long on a gated BUY,
     exits on SL/TP (checked intrabar against high/low) or a SELL signal.
 
-    ``use_trailing`` mirrors the live PaperTrader's trailing stop (arms at
-    ``TRAILING_STOP_TRIGGER`` gain, trails ``TRAILING_STOP_OFFSET`` below the
-    running high). It defaults to True so the gate is an HONEST proxy for live —
-    without it the backtest rides winners to the fixed take-profit that live
-    never reaches, badly overstating the edge.
+    ``use_trailing`` mirrors the live PaperTrader's trailing stop via the shared
+    ``strategies.trail_stop`` helper (``TRAILING_MODE`` selects ATR-scaled vs
+    legacy fixed-percent). It defaults to True so the gate is an HONEST proxy
+    for live — without it the backtest rides winners to the fixed take-profit
+    that live never reaches, badly overstating the edge.
+
+    Re-entry cooldowns (``REENTRY_COOLDOWN_S``/``STOPOUT_COOLDOWN_S``) and the
+    per-day trade cap (``MAX_TRADES_PER_SYMBOL_PER_DAY``) are modeled too, so
+    the churn-control settings are validated by the same gate. 0 disables.
     """
     fee = settings.FEE_PCT
     slip = settings.SLIPPAGE_PCT
@@ -64,6 +79,9 @@ def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
     pos = None              # dict: qty, entry, stop, take, bucket
     trades: list[dict] = []
     equity: list[float] = []
+    last_exit_ts: float | None = None   # churn control (single-symbol frame)
+    last_exit_reason = ""
+    entries_by_day: dict[int, int] = {}
 
     for i in range(warmup, len(df)):
         window = df.iloc[: i + 1]
@@ -94,14 +112,17 @@ def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
                     "bucket": pos["bucket"], "reason": reason,
                 })
                 pos = None
+                last_exit_ts, last_exit_reason = _bar_epoch(df, i), reason
             elif use_trailing:
-                # Mirror PaperTrader.update_trailing_stop: once the running high
-                # is far enough above entry, ratchet the stop up beneath it. Uses
-                # this bar's high, so the raised stop applies from the next bar
-                # (avoids same-bar SL/trail circularity).
+                # Shared strategies.trail_stop — identical math to the live
+                # PaperTrader. Uses this bar's high, so the raised stop applies
+                # from the next bar (avoids same-bar SL/trail circularity).
                 hi = max(pos["trail_high"], float(bar["high"]))
-                if (hi - pos["entry"]) / pos["entry"] >= trail_trigger:
-                    pos["stop"] = max(pos["stop"], hi * (1 - trail_offset))
+                candidate = strategies.trail_stop(pos["entry"], pos["take"], hi,
+                                                  pos["bucket"], trail_trigger,
+                                                  trail_offset)
+                if candidate is not None:
+                    pos["stop"] = max(pos["stop"], candidate)
                 pos["trail_high"] = hi
 
         # ── consider a new entry when flat ──────────────────────────────────────
@@ -112,17 +133,29 @@ def run_backtest(df: pd.DataFrame, *, initial_capital: float = 1000.0,
                 composite = tech["technical_total"] * settings.TECHNICAL_WEIGHT + \
                     50.0 * settings.SENTIMENT_WEIGHT  # neutral sentiment in backtest
                 if strat["action"] == strategies.BUY and composite >= settings.BUY_THRESHOLD:
+                    now_ts = _bar_epoch(df, i)
+                    blocked = False
+                    if last_exit_ts is not None:
+                        cd = (settings.STOPOUT_COOLDOWN_S
+                              if last_exit_reason == "stop_loss"
+                              else settings.REENTRY_COOLDOWN_S)
+                        blocked = cd > 0 and (now_ts - last_exit_ts) < cd
+                    day = int(now_ts // 86_400)
+                    day_cap = settings.MAX_TRADES_PER_SYMBOL_PER_DAY
+                    if day_cap > 0 and entries_by_day.get(day, 0) >= day_cap:
+                        blocked = True
                     atr = strat["atr"]
                     bucket = strat["bucket"] or "day"
                     entry = price * (1 + slip)
                     cost = min(cash, settings.MAX_POSITION_USDT)
-                    if cost >= settings.MIN_TRADE_USDT and atr:
+                    if not blocked and cost >= settings.MIN_TRADE_USDT and atr:
                         qty = (cost / entry) * (1 - fee)
                         stop, take = strategies.atr_stops(entry, atr, bucket)
                         cash -= cost
                         pos = {"qty": qty, "entry": entry, "cost": cost,
                                "stop": stop, "take": take, "bucket": bucket,
                                "trail_high": entry}
+                        entries_by_day[day] = entries_by_day.get(day, 0) + 1
 
         # mark-to-market equity
         held = pos["qty"] * price if pos else 0.0
