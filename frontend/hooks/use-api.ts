@@ -281,3 +281,24 @@ export function useSetMode() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["status"] }),
   });
 }
+
+export function useClearPaperData() {
+  const getToken = useToken();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      return api.bot.clearPaperData(token);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["trades"] }); // prefix-matches ["trades", limit]
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
+      qc.invalidateQueries({ queryKey: ["portfolioHistory"] });
+      qc.invalidateQueries({ queryKey: ["diagnostics"] });
+      qc.invalidateQueries({ queryKey: ["positions"] });
+      qc.invalidateQueries({ queryKey: ["status"] });
+      qc.invalidateQueries({ queryKey: ["allocation"] });
+    },
+  });
+}

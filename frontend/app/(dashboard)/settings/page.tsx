@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { Lock } from "lucide-react";
+import { toast } from "sonner";
 
 import {
+  useClearPaperData,
   useCredentials,
   useDeleteCoindcx,
   useDeleteTelegram,
@@ -13,6 +15,7 @@ import {
   useTestTelegram,
 } from "@/hooks/use-api";
 import { CredentialSection } from "@/components/settings/credential-section";
+import { DangerZone } from "@/components/settings/danger-zone";
 import { CoindcxSetupGuide } from "@/components/onboarding/coindcx-setup-guide";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,8 +31,11 @@ export default function SettingsPage() {
   const deleteTelegram = useDeleteTelegram();
   const testTelegram = useTestTelegram();
 
+  const clearData = useClearPaperData();
+
   const [coindcxError, setCoindcxError] = useState<string | null>(null);
   const [telegramError, setTelegramError] = useState<string | null>(null);
+  const [clearError, setClearError] = useState<string | null>(null);
   const [coindcxTest, setCoindcxTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [telegramTest, setTelegramTest] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -129,6 +135,34 @@ export default function SettingsPage() {
           });
         }}
         onDelete={() => deleteTelegram.mutate()}
+      />
+
+      <DangerZone
+        clearing={clearData.isPending}
+        error={clearError}
+        onClear={() => {
+          if (clearData.isPending) return;
+          setClearError(null);
+          clearData.mutate(undefined, {
+            onSuccess: (r) => {
+              if (r.warning) {
+                toast.warning(r.warning);
+              } else {
+                toast.success("Paper trading data cleared", {
+                  description: `Deleted ${r.deleted.trades} trades, ${r.deleted.positions} open positions and ${r.deleted.orders} orders.`,
+                });
+              }
+            },
+            onError: (err: unknown) => {
+              const e = err as { detail?: unknown; message?: string };
+              setClearError(
+                typeof e.detail === "string"
+                  ? e.detail
+                  : e.message ?? "Failed to clear data.",
+              );
+            },
+          });
+        }}
       />
     </div>
   );

@@ -415,6 +415,39 @@ def update_order(db: Session, client_order_id: str, **fields) -> None:
         setattr(order, k, v)
 
 
+# ── Paper-data wipe ──────────────────────────────────────────────────────────
+
+def count_live_orders(db: Session, user_id: str) -> int:
+    """
+    Safety guard for the paper-data wipe: trades/positions rows carry no mode
+    column, so any live-mode order means live history would be silently
+    destroyed — the wipe must be refused while this is non-zero.
+    """
+    return int(db.execute(
+        select(func.count(Order.id))
+        .where(Order.user_id == user_id, Order.mode == "live")
+    ).scalar() or 0)
+
+
+def clear_paper_data(db: Session, user_id: str) -> dict[str, int]:
+    """
+    Delete all paper-trading history for one user: every trades/positions row,
+    paper-mode orders, and the bucket_state rows (missing rows read back as the
+    zero defaults everywhere). Caller must verify ``count_live_orders() == 0``
+    and that the user's bot is stopped. Returns per-table deleted-row counts.
+    """
+    trades = db.query(Trade).filter_by(user_id=user_id).delete()
+    positions = db.query(Position).filter_by(user_id=user_id).delete()
+    orders = db.query(Order).filter_by(user_id=user_id, mode="paper").delete()
+    buckets = db.query(BucketState).filter_by(user_id=user_id).delete()
+    return {
+        "trades": trades,
+        "positions": positions,
+        "orders": orders,
+        "bucket_states": buckets,
+    }
+
+
 # ── Daily realized P&L (restart-safe loss-limit recovery) ─────────────────────
 
 def daily_realized_pnl(db: Session, user_id: str, day_start_ts: float) -> float:

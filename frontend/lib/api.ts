@@ -155,6 +155,14 @@ export interface AllocationView {
   buckets?: { day: BucketView; long: BucketView };
 }
 
+export interface ClearPaperDataResponse {
+  ok: boolean;
+  deleted: { trades: number; positions: number; orders: number; bucket_states: number };
+  was_running: boolean;
+  bot_restarted: boolean;
+  warning: string | null;
+}
+
 // ── Fetch helper ───────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -290,6 +298,10 @@ export const api = {
       apiFetch<{ ok: boolean; mode: string }>("/api/bot/mode", token, {
         method: "PUT",
         body: JSON.stringify(body),
+      }),
+    clearPaperData: (token: string) =>
+      apiFetch<ClearPaperDataResponse>("/api/bot/paper-data", token, {
+        method: "DELETE",
       }),
   },
 };
